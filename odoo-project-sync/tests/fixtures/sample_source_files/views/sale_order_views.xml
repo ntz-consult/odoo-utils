@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Sale Order Form View Extension -->
+    <record id="view_sale_order_form_inherit" model="ir.ui.view">
+        <field name="name">sale.order.form.weight</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='partner_id']" position="after">
+                <field name="x_total_weight"/>
+                <field name="x_weight_uom_id"/>
+            </xpath>
+            
+            <xpath expr="//page[@name='order_lines']//tree" position="inside">
+                <field name="x_secondary_uom"/>
+                <field name="x_weight_calculated"/>
+            </xpath>
+            
+            <xpath expr="//button[@name='action_confirm']" position="before">
+                <button name="action_calculate_weights" 
+                        string="Calculate Weights"
+                        type="object"
+                        class="btn-secondary"/>
+            </xpath>
+            
+            <xpath expr="//div[@name='button_box']" position="inside">
+                <button name="%(action_weight_report)d"
+                        type="action"
+                        class="oe_stat_button"
+                        icon="fa-balance-scale">
+                    <div class="o_stat_info">
+                        <field name="x_total_weight" widget="statinfo"/>
+                        <span class="o_stat_text">Weight (kg)</span>
+                    </div>
+                </button>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Sale Order Line Tree View -->
+    <record id="view_sale_order_line_tree_weight" model="ir.ui.view">
+        <field name="name">sale.order.line.tree.weight</field>
+        <field name="model">sale.order.line</field>
+        <field name="inherit_id" ref="sale.view_order_line_tree"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='price_subtotal']" position="before">
+                <field name="x_weight_calculated" optional="show"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Weight Summary Kanban -->
+    <record id="view_sale_order_kanban_weight" model="ir.ui.view">
+        <field name="name">sale.order.kanban.weight</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_sale_order_kanban"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[hasclass('oe_kanban_bottom_left')]" position="inside">
+                <span class="badge badge-pill">
+                    <i class="fa fa-balance-scale"/> 
+                    <field name="x_total_weight"/> kg
+                </span>
+            </xpath>
+        </field>
+    </record>
+</odoo>

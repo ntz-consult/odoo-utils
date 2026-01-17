@@ -1,0 +1,288 @@
+{
+  "_comment": "Time metrics updated 2026-01-05: Adjusted baselines to be realistic.",
+  "time_metrics": {
+    "field": {
+      "simple": {"dev": 0.25, "req": 0.1, "test": 0.15},
+      "medium": {"dev": 1.0, "req": 0.5, "test": 0.5},
+      "complex": {"dev": 2.0, "req": 1.0, "test": 1.0},
+      "very_complex": {"dev": 4.0, "req": 2.0, "test": 2.0}
+    },
+    "view": {
+      "simple": {"dev": 0.25, "req": 0.1, "test": 0.15},
+      "medium": {"dev": 1.5, "req": 0.5, "test": 0.5},
+      "complex": {"dev": 6.0, "req": 2.0, "test": 2.0},
+      "very_complex": {"dev": 12.0, "req": 4.0, "test": 4.0}
+    },
+    "server_action": {
+      "simple": {"dev": 0.25, "req": 0.1, "test": 0.15},
+      "medium": {"dev": 2.0, "req": 0.5, "test": 0.5},
+      "complex": {"dev": 6.0, "req": 2.0, "test": 2.0},
+      "very_complex": {"dev": 12.0, "req": 4.0, "test": 4.0}
+    },
+    "automation": {
+      "simple": {"dev": 0.25, "req": 0.1, "test": 0.15},
+      "medium": {"dev": 2.0, "req": 0.5, "test": 0.5},
+      "complex": {"dev": 6.0, "req": 2.0, "test": 2.0},
+      "very_complex": {"dev": 12.0, "req": 4.0, "test": 4.0}
+    },
+    "report": {
+      "simple": {"dev": 1.0, "req": 0.5, "test": 0.5},
+      "medium": {"dev": 4.0, "req": 1.0, "test": 1.0},
+      "complex": {"dev": 12.0, "req": 4.0, "test": 4.0},
+      "very_complex": {"dev": 24.0, "req": 8.0, "test": 8.0}
+    }
+  },
+  "complexity_rules": {
+    "_description": "Parseable rules for complexity classification. Each level defines thresholds and indicators.",
+    
+    "field": {
+      "simple": {
+        "max_loc": 5,
+        "indicators": {
+          "has_compute": false
+        },
+        "description": "Basic field type (Char, Integer, Boolean, Date, Selection) or related field with no compute method"
+      },
+      "medium": {
+        "max_loc": 15,
+        "indicators": {
+          "has_compute": true,
+          "max_orm_calls": 1
+        },
+        "description": "Computed field with simple logic, single @api.depends, optional stored=True"
+      },
+      "complex": {
+        "max_loc": 40,
+        "indicators": {
+          "has_compute": true,
+          "min_orm_calls": 2,
+          "has_search_browse": true
+        },
+        "description": "Computed field with ORM search/browse/filtered, multi-record logic"
+      },
+      "very_complex": {
+        "min_loc": 40,
+        "indicators": {
+          "cross_model_calls": true,
+          "has_sql_query": true,
+          "has_currency_compute": true,
+          "min_orm_calls": 3
+        },
+        "description": "Cross-model computed fields, raw SQL, currency/tax calculations, multi-company logic"
+      }
+    },
+    
+    "view": {
+      "simple": {
+        "max_loc": 5,
+        "indicators": {
+          "max_xpath_count": 4,
+          "has_qweb_directives": false,
+          "has_attrs_domain": false
+        },
+        "description": "Minimal view change: move/hide fields, add a few fields, simple xpath"
+      },
+      "medium": {
+        "max_loc": 80,
+        "indicators": {
+          "max_xpath_count": 6,
+          "has_attrs_domain": true,
+          "has_widget_override": true
+        },
+        "description": "Moderate xpath operations, attrs domains for visibility, widget customizations"
+      },
+      "complex": {
+        "max_loc": 200,
+        "indicators": {
+          "has_qweb_directives": true,
+          "has_t_if": true,
+          "has_t_foreach": true,
+          "has_t_call": true,
+          "is_pdf_output": false
+        },
+        "description": "QWeb templates with t-if/t-foreach/t-call logic, dynamic content rendering"
+      },
+      "very_complex": {
+        "min_loc": 200,
+        "indicators": {
+          "has_qweb_directives": true,
+          "has_t_call": true,
+          "has_nested_loops": true,
+          "is_pdf_output": true,
+          "is_label_output": true,
+          "has_js_class": true
+        },
+        "description": "QWeb for PDF/labels (endless fiddling), nested t-foreach, OWL components, js_class overrides"
+      }
+    },
+    
+    "server_action": {
+      "simple": {
+        "max_loc": 10,
+        "indicators": {
+          "max_orm_calls": 2,
+          "max_method_count": 0,
+          "has_loop": false,
+          "has_conditional": false
+        },
+        "description": "Simple ORM operation (write/create), basic field updates, no method definitions"
+      },
+      "medium": {
+        "max_loc": 30,
+        "indicators": {
+          "max_orm_calls": 5,
+          "max_method_count": 1,
+          "has_loop": true,
+          "has_conditional": true
+        },
+        "description": "Multiple ORM operations, simple for loops, if/else conditions, one helper method"
+      },
+      "complex": {
+        "max_loc": 100,
+        "indicators": {
+          "max_orm_calls": 10,
+          "max_method_count": 3,
+          "cross_model_calls": true,
+          "has_env_context": true,
+          "cross_model_calls": true
+        },
+        "description": "Multi-model operations, env.context manipulation, sudo(), multiple methods"
+      },
+      "very_complex": {
+        "min_loc": 100,
+        "indicators": {
+          "min_method_count": 3,
+          "cross_model_calls": true,
+          "has_external_api": true,
+          "has_transaction": true,
+          "has_multi_company": true
+        },
+        "description": "Scheduled actions, external API integrations, multi-company, transaction management"
+      }
+    },
+    
+    "automation": {
+      "simple": {
+        "max_loc": 8,
+        "indicators": {
+          "max_trigger_fields": 1,
+          "action_type": "update_record",
+          "has_domain_filter": false,
+          "has_python_code": false
+        },
+        "description": "Single field trigger, update current record only, no domain filter, no Python code"
+      },
+      "medium": {
+        "max_loc": 25,
+        "indicators": {
+          "max_trigger_fields": 3,
+          "has_domain_filter": true,
+          "max_domain_complexity": 2
+        },
+        "description": "Multiple field triggers, simple domain filter, update multiple fields"
+      },
+      "complex": {
+        "max_loc": 60,
+        "indicators": {
+          "has_python_code": true,
+          "has_domain_filter": true,
+          "min_domain_complexity": 3,
+          "action_type": "multi_action"
+        },
+        "description": "Python code execution, complex domain filters, chained actions, mail templates"
+      },
+      "very_complex": {
+        "min_loc": 60,
+        "indicators": {
+          "has_python_code": true,
+          "cross_model_calls": true,
+          "has_external_api": true,
+          "has_scheduled_trigger": true
+        },
+        "description": "Cross-model automations, webhook triggers, external API calls, scheduled execution"
+      }
+    },
+    
+    "report": {
+      "simple": {
+        "max_loc": 50,
+        "indicators": {
+          "is_report_action": true,
+          "has_custom_paperformat": false
+        },
+        "description": "Standard report definition, uses existing QWeb template with minor modifications"
+      },
+      "medium": {
+        "max_loc": 100,
+        "indicators": {
+          "has_custom_paperformat": true,
+          "has_custom_filename": true
+        },
+        "description": "Custom paper format, custom filename logic, header/footer modifications"
+      },
+      "complex": {
+        "max_loc": 150,
+        "indicators": {
+          "has_custom_model": true,
+          "has_data_aggregation": true
+        },
+        "description": "Custom report model with data aggregation, grouping logic in Python"
+      },
+      "very_complex": {
+        "min_loc": 150,
+        "indicators": {
+          "has_external_layout": true,
+          "has_multi_company": true,
+          "has_barcode_qr": true
+        },
+        "description": "Multi-company report logic, barcode/QR generation, external layout customization"
+      }
+    }
+  },
+  
+  "indicator_patterns": {
+    "_description": "Regex/AST patterns used to detect indicators in source code",
+    
+    "orm_patterns": {
+      "orm_calls": ["self.env\\[", "\\.search\\(", "\\.browse\\(", "\\.create\\(", "\\.write\\(", "\\.unlink\\(", "\\.filtered\\(", "\\.mapped\\(", "\\.sorted\\("],
+      "search_browse": ["\\.search\\(", "\\.browse\\(", "\\.search_read\\("],
+      "sql_query": ["cr\\.execute", "self\\._cr\\.execute", "self\\.env\\.cr\\.execute"]
+    },
+    
+    "field_patterns": {
+      "has_compute": ["compute\\s*=", "@api\\.depends"],
+      "has_related": ["related\\s*="],
+      "currency_compute": ["currency_id", "company_currency", "amount_.*currency"]
+    },
+    
+    "view_patterns": {
+      "xpath": ["<xpath"],
+      "attrs_domain": ["attrs\\s*=\\s*[\"']{"],
+      "widget_override": ["widget\\s*="],
+      "js_class": ["js_class\\s*="],
+      "onchange_trigger": ["on_change\\s*=", "@api\\.onchange"]
+    },
+    
+    "qweb_patterns": {
+      "t_foreach": ["t-foreach\\s*="],
+      "t_call": ["t-call\\s*="],
+      "t_raw": ["t-raw\\s*=", "t-out\\s*="],
+      "t_esc": ["t-esc\\s*="],
+      "t_if": ["t-if\\s*="],
+      "t_set": ["t-set\\s*="]
+    },
+    
+    "action_patterns": {
+      "python_code": ["code\\s*=", "python"],
+      "external_api": ["requests\\.", "urllib", "http\\.client"],
+      "transaction": ["with_context", "env\\.cr\\.savepoint", "commit\\(\\)"],
+      "multi_company": ["company_id", "allowed_company_ids", "company_ids"]
+    },
+    
+    "control_flow_patterns": {
+      "loop": ["for\\s+.*\\s+in\\s+", "while\\s+"],
+      "conditional": ["if\\s+", "elif\\s+", "else:"],
+      "method_def": ["def\\s+\\w+\\s*\\("]
+    }
+  }
+}

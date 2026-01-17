@@ -1,0 +1,30 @@
+{
+  "extractor": "server_actions",
+  "model": "ir.actions.server",
+  "record_count": 2,
+  "extracted_at": "2024-01-15T10:30:00",
+  "dry_run": false,
+  "output_file": "server_actions_output.json",
+  "records": [
+    {
+      "id": 3001,
+      "name": "Auto-approve Small Orders",
+      "display_name": "Auto-approve Small Orders",
+      "model_id": [123, "sale.order"],
+      "model_name": "sale.order",
+      "state": "code",
+      "code": "for record in records:\n    if record.amount_total < 1000:\n        record.x_studio_approval_status = 'approved'",
+      "is_studio": true
+    },
+    {
+      "id": 3002,
+      "name": "Send Vendor Welcome Email",
+      "display_name": "Send Vendor Welcome Email",
+      "model_id": [125, "res.partner"],
+      "model_name": "res.partner",
+      "state": "email",
+      "is_studio": true
+    }
+  ],
+  "errors": []
+}
