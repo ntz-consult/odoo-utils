@@ -1,38 +1,31 @@
 #!/bin/bash
 # common.sh — shared environment loader for Odoo project run-scripts
 # Usage: source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+#
+# IMPORTANT: .env and odoo.conf are ALWAYS read from the CURRENT DIRECTORY ($PWD).
+# They are NEVER looked for in the script directory.
 
 set -euo pipefail
 
-# Resolve SCRIPT_DIR (docs/run-scrips)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ---------------------------------------------------------------------------
+# Resolve ENV_DIR (current working directory ONLY)
+# ---------------------------------------------------------------------------
+ENV_DIR="$(pwd)"
 
 # ---------------------------------------------------------------------------
 # Load .env
 # ---------------------------------------------------------------------------
-# Look for .env in script directory first, then fall back to current directory
-CURRENT_DIR="$(pwd)"
-if [[ -f "$SCRIPT_DIR/.env" ]]; then
-    ENV_FILE="$SCRIPT_DIR/.env"
-    ENV_DIR="$SCRIPT_DIR"
-elif [[ -f "$CURRENT_DIR/.env" ]]; then
-    ENV_FILE="$CURRENT_DIR/.env"
-    ENV_DIR="$CURRENT_DIR"
-else
-    echo "Error: .env not found in current directory ($CURRENT_DIR) or script directory ($SCRIPT_DIR)."
-    echo "Run: init_env.sh from your project directory to create .env"
+ENV_FILE="$ENV_DIR/.env"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+    echo "Error: .env not found in current directory ($ENV_DIR)."
+    echo "Run: odoo-init-env from this directory to create .env"
     exit 1
 fi
 
 set -a
 source "$ENV_FILE"
 set +a
-
-# ---------------------------------------------------------------------------
-# Resolve PROJECT_ROOT
-# ---------------------------------------------------------------------------
-# PROJECT_ROOT from .env takes priority, otherwise use directory containing .env
-PROJECT_ROOT="${PROJECT_ROOT:-$ENV_DIR}"
 
 # ---------------------------------------------------------------------------
 # Validate required variables
@@ -60,6 +53,6 @@ fi
 
 if [[ ! -f "$CONF_FILE" ]]; then
     echo "Error: $CONF_FILE not found."
-    echo "Run: init_env.sh from your project directory to create odoo.conf"
+    echo "Run: odoo-init-env from this directory to create odoo.conf"
     exit 1
 fi
