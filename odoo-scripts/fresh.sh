@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Quick database refresh from SQL dump
+#
+# Usage:
+#   odoo-fresh                           # Quick refresh
+#   odoo-fresh --update                  # Also sync Odoo source, update modules, refresh dump
+#
+# Environment (see .env in current directory):
+#   PROJECT_NAME - Project db name
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
@@ -8,7 +17,7 @@ if [ $# -eq 0 ]; then
     exit 0
 fi
 
-DUMP_FILE="$SCRIPT_DIR/dump_${PROJECT_NAME}.sql"
+DUMP_FILE="$ENV_DIR/dump_${PROJECT_NAME}.sql"
 
 clear
 
@@ -47,5 +56,3 @@ if [[ "$UPDATE_MODE" == true ]]; then
 fi
 
 echo "Done!"
-
-

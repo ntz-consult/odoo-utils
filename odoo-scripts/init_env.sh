@@ -2,21 +2,21 @@
 # init_env.sh — Bootstrap environment for Odoo project
 #
 # Usage:
-#   ./init_env.sh                    # Generate .env + odoo.conf (interactive prompts)
-#   ./init_env.sh --force            # Overwrite existing files (backs up to .bak)
-#   ./init_env.sh --venv-create      # Also create Python venv + install deps
-#   ./init_env.sh --venv-only        # Verify/create venv, update PYTHON_PATH
-#   ./init_env.sh --update-conf      # Regenerate odoo.conf from template only
+#   odoo-init-env                    # Generate .env + odoo.conf (interactive prompts)
+#   odoo-init-env --force            # Overwrite existing files (backs up to .bak)
+#   odoo-init-env --venv-create      # Also create Python venv + install deps
+#   odoo-init-env --venv-only        # Verify/create venv, update PYTHON_PATH
+#   odoo-init-env --update-conf      # Regenerate odoo.conf from existing .env
+#
+# IMPORTANT: .env and odoo.conf are ALWAYS created in the CURRENT DIRECTORY ($PWD).
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CURRENT_DIR="$(pwd)"
-PROJECT_ROOT="$CURRENT_DIR"
+ENV_DIR="$(pwd)"
+PROJECT_ROOT="$ENV_DIR"
 
-ENV_FILE="$SCRIPT_DIR/.env"
-CONF_FILE="$SCRIPT_DIR/odoo.conf"
-TEMPLATE_FILE="$SCRIPT_DIR/odoo.conf.template"
+ENV_FILE="$ENV_DIR/.env"
+CONF_FILE="$ENV_DIR/odoo.conf"
 
 FORCE=false
 VENV_CREATE=false
@@ -64,6 +64,59 @@ prompt() {
     echo "$val"
 }
 
+generate_odoo_conf() {
+    local out_file="$1"
+    cat > "$out_file" <<EOF
+[options]
+
+; ── Network ────────────────────────────────────────────────
+http_interface = 0.0.0.0
+http_port      = ${HTTP_PORT}
+
+; ── Database ─────────────────────────────────────────────
+EOF
+
+    if [[ -n "${DB_HOST:-}" ]]; then
+        echo "db_host        = ${DB_HOST}" >> "$out_file"
+    fi
+    if [[ -n "${DB_PORT:-}" ]]; then
+        echo "db_port        = ${DB_PORT}" >> "$out_file"
+    fi
+    if [[ -n "${DB_USER:-}" ]]; then
+        echo "db_user        = ${DB_USER}" >> "$out_file"
+    fi
+    if [[ -n "${DB_PASSWORD:-}" ]]; then
+        echo "db_password    = ${DB_PASSWORD}" >> "$out_file"
+    fi
+
+    cat >> "$out_file" <<EOF
+
+; Uncomment the next line ONLY if you want to lock Odoo to one specific database
+; (no database selector/manager will appear)
+db_name        = ${DB_NAME}
+
+; ── Addons ─────────────────────────────────────────────────
+addons_path    = ${ODOO_ROOT}/odoo/addons,
+                 ${ODOO_ROOT}/enterprise,
+                 ${ODOO_ROOT}/themes,
+                 ${PROJECT_ROOT}
+
+; ── Security ─────────────────────────────────────────────
+list_db        = False
+
+; ── Proxy ──────────────────────────────────────────────────
+; Set to True only when running behind nginx / apache with proper X-Forwarded-* headers
+proxy_mode     = False
+
+; ── Logging ─────────────────────────────────────────────
+log_level      = info
+; logfile      = ${PROJECT_ROOT}/${PROJECT_NAME}.log   ; uncomment if you want file logging
+
+; ── Binary Path (for wkhtmltopdf and other tools) ─────────
+bin_path = ${BIN_PATH}
+EOF
+}
+
 # ---------------------------------------------------------------------------
 # --update-conf only
 # ---------------------------------------------------------------------------
@@ -72,24 +125,11 @@ if $UPDATE_CONF_ONLY; then
         echo "Error: $ENV_FILE not found. Run without --update-conf first."
         exit 1
     fi
-    if [[ ! -f "$TEMPLATE_FILE" ]]; then
-        echo "Error: Template not found: $TEMPLATE_FILE"
-        exit 1
-    fi
-    echo "Regenerating $CONF_FILE from template..."
+    echo "Regenerating $CONF_FILE from $ENV_FILE..."
     set -a
     source "$ENV_FILE"
     set +a
-    export PROJECT_ROOT
-    DB_HOST="${DB_HOST:-}"
-    DB_PORT="${DB_PORT:-}"
-    DB_USER="${DB_USER:-}"
-    DB_PASSWORD="${DB_PASSWORD:-}"
-    export DB_HOST DB_PORT DB_USER DB_PASSWORD
-    envsubst < "$TEMPLATE_FILE" > "$CONF_FILE"
-    for key in db_host db_port db_user db_password; do
-        sed -i "/^${key}[[:space:]]*=[[:space:]]*$/d" "$CONF_FILE"
-    done
+    generate_odoo_conf "$CONF_FILE"
     echo "Done."
     exit 0
 fi
@@ -103,7 +143,7 @@ if $VENV_ONLY; then
         set -a
         source "$ENV_FILE"
         set +a
-        PROJECT_ROOT="${PROJECT_ROOT:-$CURRENT_DIR}"
+        PROJECT_ROOT="${PROJECT_ROOT:-$ENV_DIR}"
     fi
 
     VENV_PATH="$PROJECT_ROOT/.venv"
@@ -128,7 +168,7 @@ fi
 # Determine defaults
 # ---------------------------------------------------------------------------
 DEFAULT_ODOO_ROOT="$HOME/Odoo/V19"
-DEFAULT_PROJECT_ROOT="$CURRENT_DIR"
+DEFAULT_PROJECT_ROOT="$ENV_DIR"
 
 DEFAULT_PYTHON_PATH="$PROJECT_ROOT/.venv/bin"
 
@@ -165,7 +205,6 @@ fi
 # ---------------------------------------------------------------------------
 # Interactive prompts
 # ---------------------------------------------------------------------------
-# Prompt for all variables so the user can confirm or override defaults
 echo "=== Environment Setup ==="
 echo ""
 echo "Press Enter to accept defaults, or type new values:"
@@ -268,24 +307,13 @@ EOF
 echo "Written: $ENV_FILE"
 
 # ---------------------------------------------------------------------------
-# Generate odoo.conf from template
+# Generate odoo.conf
 # ---------------------------------------------------------------------------
-if [[ ! -f "$TEMPLATE_FILE" ]]; then
-    echo "Error: Template not found: $TEMPLATE_FILE"
-    exit 1
-fi
-
 if [[ -f "$CONF_FILE" ]] && $FORCE; then
     backup_file "$CONF_FILE"
 fi
 
-# Export all vars for envsubst
-export ODOO_ROOT PYTHON_PATH PROJECT_NAME DB_NAME DB_HOST DB_PORT DB_USER DB_PASSWORD HTTP_PORT BIN_PATH PROJECT_ROOT ODOO_SYNC_SCRIPT
-
-envsubst < "$TEMPLATE_FILE" > "$CONF_FILE"
-for key in db_host db_port db_user db_password; do
-    sed -i "/^${key}[[:space:]]*=[[:space:]]*$/d" "$CONF_FILE"
-done
+generate_odoo_conf "$CONF_FILE"
 echo "Generated: $CONF_FILE"
 
 # ---------------------------------------------------------------------------
@@ -325,6 +353,7 @@ echo "  PROJECT_NAME : $PROJECT_NAME"
 echo "  DB_NAME      : $DB_NAME"
 echo "  HTTP_PORT    : $HTTP_PORT"
 echo ""
+echo "Files created in: $ENV_DIR"
 echo "Next steps:"
 echo "  odoo-run        # Start Odoo server"
 echo "  odoo-test       # Run tests"

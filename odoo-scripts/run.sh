@@ -3,16 +3,16 @@
 # Run Odoo server with configurable project
 #
 # Usage:
-#   ./run_odoo.sh                           # Start server with default config
-#   ./run_odoo.sh --conf <file.conf>        # Use custom config file
-#   ./run_odoo.sh --log                     # Log to file
-#   ./run_odoo.sh --                        # Pass args to odoo-bin
+#   odoo-run                           # Start server with default config
+#   odoo-run --conf <file.conf>        # Use custom config file
+#   odoo-run --log                     # Log to file
+#   odoo-run --                        # Pass args to odoo-bin
 #
-# Environment (see .env):
+# Environment (see .env in current directory):
 #   ODOO_ROOT    - Odoo source root
 #   PROJECT_ROOT - Project addons root
 #   PROJECT_NAME - Project db name
-#   PYTHON_PATH - Python venv bin directory
+#   PYTHON_PATH  - Python venv bin directory
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
@@ -58,7 +58,7 @@ if [ ! -f "$ODOO_BIN" ]; then
     exit 1
 fi
 
-LOG_FILE="${LOG_FILE:-$SCRIPT_DIR/${PROJECT_NAME}.log}"
+LOG_FILE="${LOG_FILE:-$ENV_DIR/${PROJECT_NAME}.log}"
 
 if [ "$USE_LOGFILE" = "true" ]; then
     rm -f "$LOG_FILE"

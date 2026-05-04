@@ -3,24 +3,25 @@
 # Test utility for Odoo modules
 #
 # Usage:
-#   ./test_odoo.sh --list                        # List all installed modules
-#   ./test_odoo.sh --list-tests <mod> [file]      # List test files and classes
-#   ./test_odoo.sh --test <mod> [file:class.test]   # Run Python tests
-#   ./test_odoo.sh --testall                     # Run all Python tests for all modules
-#   ./test_odoo.sh --test-js [mod]               # Run JS unit tests (fast, no module update)
-#   ./test_odoo.sh --test-js-all                 # Run JS unit tests for all modules (full suite)
-#   ./test_odoo.sh --log [filename]              # Log output to file
-#   ./test_odoo.sh --path <directory>            # Custom addons path
+#   odoo-test --list                        # List all installed modules
+#   odoo-test --list-tests <mod> [file]      # List test files and classes
+#   odoo-test --test <mod> [file:class.test]   # Run Python tests
+#   odoo-test --testall                     # Run all Python tests for all modules
+#   odoo-test --test-js [mod]               # Run JS unit tests (fast, no module update)
+#   odoo-test --test-js-all                 # Run JS unit tests for all modules (full suite)
+#   odoo-test --log [filename]              # Log output to file
+#   odoo-test --path <directory>            # Custom addons path
 #
-# Environment (see .env):
+# Environment (see .env in current directory):
 #   ODOO_ROOT    - Odoo source root
 #   PROJECT_ROOT - Project addons root
 #   PROJECT_NAME - Project db name
-#   PYTHON_PATH - Python venv bin directory
+#   PYTHON_PATH  - Python venv bin directory
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
-LOG_FILE="$SCRIPT_DIR/${PROJECT_NAME}_test.log"
+
+LOG_FILE="$ENV_DIR/${PROJECT_NAME}_test.log"
 
 ADDONS_PATH="$PROJECT_ROOT"
 
@@ -41,7 +42,7 @@ usage() {
     echo "  --testall                    Run all Python tests for all modules"
     echo "  --test-js [mod]              Run JS unit tests for project module(s)"
     echo "  --test-js-all                Run JS unit tests for all modules"
-    echo "  --log [filename]              Log output to file (default: ${PROJECT_NAME}_test.log)"
+    echo "  --log [filename]              Log output to file (default: ${PROJECT_NAME}_test.log in current dir)"
     echo "  --help                        Show this help message"
     echo ""
     echo "Environment:"

@@ -3,12 +3,12 @@
 # Reset Odoo database from SQL dump
 #
 # Usage:
-#   ./reset_db.sh                           # Reset using default db
-#   ./reset_db.sh --db <database>            # Custom database name
-#   ./reset_db.sh --dump <file.sql>         # Custom dump file
-#   ./reset_db.sh --update                  # Also sync Odoo source, update modules, refresh dump
+#   odoo-reset-db                           # Reset using default db
+#   odoo-reset-db --db <database>            # Custom database name
+#   odoo-reset-db --dump <file.sql>         # Custom dump file
+#   odoo-reset-db --update                  # Also sync Odoo source, update modules, refresh dump
 #
-# Environment (see .env):
+# Environment (see .env in current directory):
 #   ODOO_ROOT    - Odoo source root
 #   PROJECT_ROOT - Project addons root
 #   PROJECT_NAME - Project db name
@@ -22,7 +22,7 @@ if [ $# -eq 0 ]; then
 fi
 
 DB_NAME="$PROJECT_NAME"
-DUMP_FILE="$SCRIPT_DIR/dump_${PROJECT_NAME}.sql"
+DUMP_FILE="$ENV_DIR/dump_${PROJECT_NAME}.sql"
 UPDATE_MODE=false
 
 while [[ $# -gt 0 ]]; do
