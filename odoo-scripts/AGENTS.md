@@ -37,6 +37,7 @@ This generates in the **current directory**:
 ## Architecture
 
 - **`common.sh`** — sourced by all scripts. Loads `.env`, validates vars, sets `PROJECT_ROOT`, exports `ODOO_BIN`.
+- **`configure_settings.sh`** — helper invoked by `init.sh` after module installation. Applies `res.config.settings` via `odoo-bin shell` to enable features (packages, variants, UoM, storage locations, etc.).
 - **`.env` / `odoo.conf` lookup:** ONLY in the **current working directory** (`$PWD`). Never in the script directory.
 - **Required vars:** `ODOO_ROOT`, `PROJECT_NAME`, `DB_NAME`, `PYTHON_PATH`
 - **`ODOO_BIN`** is derived as `${ODOO_ROOT}/odoo/odoo-bin`
@@ -64,7 +65,7 @@ odoo-install --update <module>
 odoo-install --uninstall <module>
 
 # Database
-odoo-init                         # Drop/create DB, -i base
+odoo-init                         # Drop/create DB, interactive module install [Y/n], configure settings, create pg_dump backup
 odoo-reset-db                     # Restore from dump.sql in current directory
 odoo-reset-db --update            # Also sync Odoo source, update all, refresh dump
 odoo-fresh                        # Quick DB refresh from dump in current directory

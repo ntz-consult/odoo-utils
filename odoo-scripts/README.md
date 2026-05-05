@@ -27,13 +27,20 @@ odoo-test --test mymodule
 | `odoo-init-env` | `init_env.sh` | Bootstrap `.env` and `odoo.conf` in the current directory. Use `--force` to overwrite (backs up to `.bak`), `--venv-create` to build a Python venv. |
 | `odoo-run` | `run.sh` | Start the Odoo server. Pass `--log` for file logging or `--conf <file>` for a custom config. |
 | `odoo-test` | `test.sh` | Run Python or JS unit tests. Supports `--test <module>`, `--testall`, `--test-js`, `--list`, etc. |
-| `odoo-init` | `init.sh` | Drop and recreate the database, then initialize with `-i base`. |
+| `odoo-init` | `init.sh` | Drop and recreate the database, interactively install modules (`[Y/n]` prompts), configure module settings, and create a `pg_dump` backup in `$PWD`. |
 | `odoo-install` | `install.sh` | Install, update, or uninstall modules. Use `--list` to see statuses, `--all` to install everything. |
 | `odoo-reset-db` | `reset_db.sh` | Reset the database from an SQL dump in the current directory. Use `--update` to also sync Odoo source and refresh the dump. |
 | `odoo-fresh` | `fresh.sh` | Quick database refresh from dump in the current directory. |
 | `odoo-cloc` | `cloc.sh` | Count lines of code for all project modules via `odoo-bin cloc`. |
 | `odoo-lint` | `python-lint.sh` | Run ruff, vulture, and radon on project modules. Use `--fix` to auto-fix. |
 | `odoo-sync` | `sync.sh` | Compare DB records against XML data files (preview/update). |
+
+### Helper Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `configure_settings.sh` | Applies `res.config.settings` after `init.sh` installs modules. Enables features (packages, variants, UoM, storage locations, etc.) via `odoo-bin shell`. Called automatically by `odoo-init`; can also be run standalone. |
+| `common.sh` | Shared library sourced by all bash scripts. Loads `.env` from the current directory, validates vars, and sets `PROJECT_ROOT` automatically. |
 
 ## Configuration
 
