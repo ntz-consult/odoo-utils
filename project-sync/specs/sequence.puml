@@ -1,0 +1,29 @@
+@startuml
+skinparam monochrome true
+skinparam shadowing false
+skinparam participantBackgroundColor #FFFFFF
+skinparam participantBorderColor #000000
+skinparam arrowColor #000000
+skinparam noteBackgroundColor #F0F0F0
+skinparam noteBorderColor #000000
+
+participant "Extract" as Extract
+participant "GenerateModules" as GenMods
+participant "GenerateFeatureMap" as GenFeat
+participant "GenerateToDo" as GenToDo
+participant "Sync" as Sync
+
+Extract -> Extract : Create extract.json\nand module_model_map.toml
+
+Extract -> GenMods : Use extract.json\nand module_model_map.toml
+GenMods -> GenMods : Create Odoo custom\nmodule style source files
+
+GenMods -> GenFeat : Use Odoo source files
+GenFeat -> GenFeat : Create feature_user_story_map.toml
+
+GenFeat -> GenToDo : Use feature_user_story_map.toml\nand Odoo source files
+GenToDo -> GenToDo : Create ToDo.md
+
+GenToDo -> Sync : Use ToDo.md\n(optional: feature_user_story_map.toml\nand Odoo source files)
+Sync -> Sync : Create Odoo articles\nand project tasks
+@enduml

@@ -1,0 +1,63 @@
+{
+  "extractor": "fields",
+  "model": "ir.model.fields",
+  "record_count": 4,
+  "extracted_at": "2024-01-15T10:30:00",
+  "dry_run": false,
+  "output_file": "custom_fields_output.json",
+  "records": [
+    {
+      "id": 1001,
+      "name": "x_studio_approval_status",
+      "field_description": "Approval Status",
+      "model": "sale.order",
+      "model_id": [123, "sale.order"],
+      "ttype": "selection",
+      "state": "manual",
+      "required": false,
+      "readonly": false,
+      "store": true,
+      "is_studio": true
+    },
+    {
+      "id": 1002,
+      "name": "x_studio_priority_level",
+      "field_description": "Priority Level",
+      "model": "sale.order",
+      "model_id": [123, "sale.order"],
+      "ttype": "selection",
+      "state": "manual",
+      "required": false,
+      "readonly": false,
+      "store": true,
+      "is_studio": true
+    },
+    {
+      "id": 1003,
+      "name": "x_custom_discount",
+      "field_description": "Custom Discount",
+      "model": "sale.order.line",
+      "model_id": [124, "sale.order.line"],
+      "ttype": "float",
+      "state": "manual",
+      "required": false,
+      "readonly": false,
+      "store": true,
+      "is_studio": false
+    },
+    {
+      "id": 1004,
+      "name": "x_studio_vendor_code",
+      "field_description": "Vendor Code",
+      "model": "res.partner",
+      "model_id": [125, "res.partner"],
+      "ttype": "char",
+      "state": "manual",
+      "required": false,
+      "readonly": false,
+      "store": true,
+      "is_studio": true
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,20 @@
+{
+  "extractor": "reports",
+  "model": "ir.actions.report",
+  "record_count": 1,
+  "extracted_at": "2024-01-15T10:30:00",
+  "dry_run": false,
+  "output_file": "reports_output.json",
+  "records": [
+    {
+      "id": 5001,
+      "name": "Custom Sales Quote",
+      "display_name": "Custom Sales Quote",
+      "model": "sale.order",
+      "report_type": "qweb-pdf",
+      "report_name": "sale.report_custom_quote",
+      "is_studio": true
+    }
+  ],
+  "errors": []
+}

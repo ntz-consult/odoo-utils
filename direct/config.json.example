@@ -1,0 +1,6 @@
+{
+    "url": "https://mycompany.odoo.com",
+    "database": "my_database",
+    "username": "user@example.com",
+    "api_key": "your_api_key_here"
+}

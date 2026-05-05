@@ -1,0 +1,24 @@
+{
+  "extractor": "automations",
+  "model": "base.automation",
+  "record_count": 1,
+  "extracted_at": "2024-01-15T10:30:00",
+  "dry_run": false,
+  "output_file": "auto_actions_output.json",
+  "records": [
+    {
+      "id": 4001,
+      "name": "Notify Manager on High Priority",
+      "display_name": "Notify Manager on High Priority",
+      "model_id": [123, "sale.order"],
+      "model_name": "sale.order",
+      "trigger": "on_write",
+      "trigger_field_ids": [[6, false, [1002]]],
+      "filter_domain": "[('x_studio_priority_level', '=', 'high')]",
+      "state": "email",
+      "active": true,
+      "is_studio": true
+    }
+  ],
+  "errors": []
+}

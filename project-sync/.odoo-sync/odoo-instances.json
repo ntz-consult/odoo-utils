@@ -1,0 +1,46 @@
+{
+  "instances": {
+    "implementation": {
+      "description": "Client Production - READ ONLY",
+      "implementation_type": "studio",
+      "odoo_version": "19",
+      "odoo_source": "~/Odoo/V19",
+      "url": "https://example.odoo.com",
+      "database": "ropeworx",
+      "username": "test@example.com",
+      "api_key": "dummy_key",
+      "read_only": true,
+      "purpose": "extraction"
+    },
+    "development": {
+      "description": "Development - READ/WRITE",
+      "implementation_type": "sh",
+      "url": "https://dev.odoo.com",
+      "database": "dev_db",
+      "username": "dev@example.com",
+      "api_key": "dummy_key",
+      "read_only": false,
+      "purpose": "development",
+      "odoo_version": "19",
+      "project": {
+        "id": 1,
+        "name": "Odoo Project",
+        "sale_line_id": null
+      }
+    }
+  },
+  "active_instance": "development",
+  "sync": {
+    "conflict_resolution": "prefer_local",
+    "preserve_logged_time": true,
+    "auto_move_completed": true,
+    "require_confirmation": false
+  },
+  "extraction_filters": {
+    "custom_fields": [["create_uid", "in", [5]]],
+    "server_actions": [["create_uid", "in", [5]]],
+    "automations": [["create_uid", "in", [5]]],
+    "views": [["create_uid", "in", [5]]],
+    "reports": [["create_uid", "in", [5]]]
+  }
+}
