@@ -1,0 +1,24 @@
+{
+  "instances": {
+    "implementation": {
+      "description": "Test Implementation",
+      "url": "https://impl.odoo.com",
+      "database": "impl_db",
+      "username": "impl@test.com",
+      "api_key": "impl_key_123",
+      "read_only": true,
+      "purpose": "extraction",
+      "odoo_version": "19"
+    },
+    "development": {
+      "description": "Test Development",
+      "url": "https://dev.odoo.com",
+      "database": "dev_db",
+      "username": "dev@test.com",
+      "api_key": "dev_key_456",
+      "read_only": false,
+      "purpose": "development",
+      "odoo_version": "19"
+    }
+  }
+}

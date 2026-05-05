@@ -1,0 +1,37 @@
+{
+  "instances": {
+    "implementation": {
+      "description": "Mock Implementation - READ ONLY",
+      "url": "https://mock-impl.odoo.com",
+      "database": "mock_impl_db",
+      "username": "admin@mock.com",
+      "api_key": "mock_impl_api_key",
+      "read_only": true,
+      "purpose": "extraction",
+      "odoo_version": "19"
+    },
+    "development": {
+      "description": "Mock Development - READ/WRITE",
+      "url": "https://mock-dev.odoo.com",
+      "database": "mock_dev_db",
+      "username": "admin@mock.com",
+      "api_key": "mock_dev_api_key",
+      "read_only": false,
+      "purpose": "development",
+      "odoo_version": "19",
+      "project": {
+        "id": 1,
+        "name": "Mock Project",
+        "sale_line_id": null
+      }
+    }
+  },
+  "active_instance": "development",
+  "sync": {
+    "conflict_resolution": "prefer_local",
+    "preserve_logged_time": true,
+    "auto_move_completed": true,
+    "require_confirmation": false
+  },
+
+}

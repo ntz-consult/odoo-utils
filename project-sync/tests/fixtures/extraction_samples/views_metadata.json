@@ -1,0 +1,29 @@
+{
+  "extractor": "views",
+  "model": "ir.ui.view",
+  "record_count": 2,
+  "extracted_at": "2024-01-15T10:30:00",
+  "dry_run": false,
+  "output_file": "views_metadata.json",
+  "records": [
+    {
+      "id": 2001,
+      "name": "sale.order.form.studio_customization",
+      "display_name": "Sales Order Form (Studio)",
+      "model": "sale.order",
+      "type": "form",
+      "arch": "<form>\n  <field name=\"x_studio_approval_status\"/>\n  <field name=\"x_studio_priority_level\"/>\n</form>",
+      "is_studio": true
+    },
+    {
+      "id": 2002,
+      "name": "res.partner.form.vendor_extension",
+      "display_name": "Partner Form Extension",
+      "model": "res.partner",
+      "type": "form",
+      "arch": "<form>\n  <group string=\"Vendor Info\">\n    <field name=\"x_studio_vendor_code\"/>\n  </group>\n</form>",
+      "is_studio": true
+    }
+  ],
+  "errors": []
+}

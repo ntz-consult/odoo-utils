@@ -1,0 +1,46 @@
+{
+  "instances": {
+    "implementation": {
+      "description": "Client Production - READ ONLY",
+      "implementation_type": "studio",
+      "odoo_version": "19",
+      "odoo_source": "~/path/to/odoo/source",
+      "url": "https://your-instance.odoo.com",
+      "database": "your-database",
+      "username": "your@email.com",
+      "api_key": "${ODOO_IMPLEMENTATION_API_KEY}",
+      "read_only": true,
+      "purpose": "extraction"
+    },
+    "development": {
+      "description": "Development - READ/WRITE",
+      "implementation_type": "sh",
+      "url": "https://your-dev-instance.odoo.com",
+      "database": "your-dev-database",
+      "username": "your@email.com",
+      "api_key": "${ODOO_DEV_API_KEY}",
+      "read_only": false,
+      "purpose": "development",
+      "odoo_version": "19",
+      "project": {
+        "id": 0,
+        "name": "Your Project Name",
+        "sale_line_id": 0
+      }
+    }
+  },
+  "active_instance": "development",
+  "sync": {
+    "conflict_resolution": "prefer_local",
+    "preserve_logged_time": true,
+    "auto_move_completed": true,
+    "require_confirmation": false
+  },
+  "extraction_filters": {
+    "custom_fields": "[ ('create_uid', 'in', [5]) ]",
+    "server_actions": "[ ('create_uid', 'in', [5]) ]",
+    "automations": "[ ('create_uid', 'in', [5]) ]",
+    "views": "[ '&', ('active', '=', True), ('create_uid', 'in', [5]) ]",
+    "reports": "[ ('create_uid', 'in', [5]) ]"
+  }
+}
