@@ -299,6 +299,27 @@ HTTP_PORT=$HTTP_PORT
 BIN_PATH=$BIN_PATH
 
 # =============================================================================
+# Global Odoo Commands
+# =============================================================================
+# These commands are available globally via wrapper scripts in:
+#   ~/.local/share/odoo/bin/
+#
+# Each wrapper calls the corresponding script in the odoo-scripts directory:
+#   odoo-run        -> run.sh
+#   odoo-test       -> test.sh
+#   odoo-init       -> init.sh
+#   odoo-install    -> install.sh
+#   odoo-init-env   -> init_env.sh
+#   odoo-reset-db   -> reset_db.sh
+#   odoo-fresh      -> fresh.sh
+#   odoo-lint       -> python-lint.sh
+#   odoo-cloc       -> cloc.sh
+#   odoo-sync       -> sync.sh
+#
+# All commands read .env and odoo.conf from the current working directory.
+# Ensure ~/.local/share/odoo/bin is in your $PATH.
+
+# =============================================================================
 # Optional Odoo Source Sync Script
 # =============================================================================
 # Path to a script that refreshes the Odoo source tree (e.g. rsync, git pull).
