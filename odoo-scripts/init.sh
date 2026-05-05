@@ -102,11 +102,13 @@ fi
 
 # Delete preconfigured default product attributes
 echo "Deleting default product attributes..."
-DELETE_ATTRS_SCRIPT="attrs = env['product.attribute'].search([])
-for attr in attrs:
+DELETE_ATTRS_SCRIPT="attr_ids = env['product.attribute'].search([]).ids
+for attr_id in attr_ids:
+    attr = env['product.attribute'].browse(attr_id)
     try:
+        attr_name = attr.name
         attr.unlink()
-        print(f'Deleted attribute: {attr.name}')
+        print(f'Deleted attribute: {attr_name}')
     except Exception as e:
         print(f'Could not delete attribute {attr.name}: {e}')
 env.cr.commit()
