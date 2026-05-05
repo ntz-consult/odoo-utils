@@ -182,10 +182,12 @@ DEFAULT_BIN_PATH="/usr/local/bin"
 DEFAULT_ODOO_SYNC_SCRIPT="rsync-v19.sh"
 
 # ---------------------------------------------------------------------------
-# Read existing .env if present (and not forcing)
+# Read existing .env if present (always load as defaults)
 # ---------------------------------------------------------------------------
-if [[ -f "$ENV_FILE" ]] && ! $FORCE; then
-    echo "Found existing $ENV_FILE — loading defaults from it."
+if [[ -f "$ENV_FILE" ]]; then
+    if ! $FORCE; then
+        echo "Found existing $ENV_FILE — loading defaults from it."
+    fi
     set -a
     source "$ENV_FILE"
     set +a
@@ -328,12 +330,15 @@ if $VENV_CREATE; then
         echo "Venv already exists at $VENV_DIR"
     fi
 
-    REQUIREMENTS="$ODOO_ROOT/requirements.txt"
+    REQUIREMENTS="$ODOO_ROOT/odoo/requirements.txt"
+    if [[ ! -f "$REQUIREMENTS" ]]; then
+        REQUIREMENTS="$ODOO_ROOT/requirements.txt"
+    fi
     if [[ -f "$REQUIREMENTS" ]]; then
         echo "Installing requirements from $REQUIREMENTS..."
         "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS"
     else
-        echo "Warning: requirements.txt not found at $REQUIREMENTS"
+        echo "Warning: requirements.txt not found at $ODOO_ROOT/odoo/requirements.txt or $ODOO_ROOT/requirements.txt"
     fi
 
     # Ensure .env PYTHON_PATH points to the new venv
