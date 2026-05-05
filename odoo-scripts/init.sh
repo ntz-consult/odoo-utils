@@ -68,8 +68,8 @@ if [ "$MODULES_FROM_CLI" = false ] && [ -t 0 ]; then
     echo "Select additional modules to install:"
     ADDITIONAL_MODULES=()
     for mod in "${SUGGESTED_MODULES[@]}"; do
-        read -r -p "  Install $mod? [y/N]: " choice
-        if [[ "$choice" =~ ^[Yy]$ ]]; then
+        read -r -p "  Install $mod? [Y/n]: " choice
+        if [[ ! "$choice" =~ ^[Nn]$ ]]; then
             ADDITIONAL_MODULES+=("$mod")
         fi
     done
@@ -92,6 +92,27 @@ psql -c "create database $DB_NAME OWNER odoo;"
 # Initialize Odoo with requested modules
 echo "Initializing Odoo database with -i $MODULES..."
 "$ODOO_BIN" -c "$CONF_FILE" -d "$DB_NAME" -i "$MODULES" --stop-after-init
+
+# Configure settings for installed modules
+CONFIGURE_ARGS=(--db "$DB_NAME" --modules "$MODULES")
+if [ "$MODULES_FROM_CLI" = true ]; then
+    CONFIGURE_ARGS+=(--non-interactive)
+fi
+"$SCRIPT_DIR/configure_settings.sh" "${CONFIGURE_ARGS[@]}"
+
+# Delete preconfigured default product attributes
+echo "Deleting default product attributes..."
+DELETE_ATTRS_SCRIPT="attrs = env['product.attribute'].search([])
+for attr in attrs:
+    try:
+        attr.unlink()
+        print(f'Deleted attribute: {attr.name}')
+    except Exception as e:
+        print(f'Could not delete attribute {attr.name}: {e}')
+env.cr.commit()
+print('Default product attributes cleanup complete.')
+"
+"$ODOO_BIN" shell -c "$CONF_FILE" -d "$DB_NAME" --no-http <<< "$DELETE_ATTRS_SCRIPT"
 
 # Create backup in $PWD
 DUMP_FILE="$PWD/dump_${DB_NAME}.sql"
