@@ -26,7 +26,7 @@ odoo-test --test mymodule
 |---------|--------|---------|
 | `odoo-init-env` | `init_env.sh` | Bootstrap `.env` and `odoo.conf` in the current directory. Use `--force` to overwrite (backs up to `.bak`), `--venv-create` to build a Python venv. |
 | `odoo-run` | `run.sh` | Start the Odoo server. Pass `--log` for file logging or `--conf <file>` for a custom config. |
-| `odoo-test` | `test.sh` | Run Python or JS unit tests. Supports `--test <module>`, `--testall`, `--test-js`, `--list`, etc. |
+| `odoo-test` | `test.sh` | Run Python or JS unit tests. Supports `--test <module>`, `--testall`, `--test-js`, `--list`, etc. Use `--agent` for clean AI-parseable output and `--conf <file>` for a custom config. |
 | `odoo-init` | `init.sh` | Drop and recreate the database, interactively install modules (`[Y/n]` prompts), configure module settings, and create a `pg_dump` backup in `$PWD`. |
 | `odoo-install` | `install.sh` | Install, update, or uninstall modules. Use `--list` to see statuses, `--all` to install everything. |
 | `odoo-reset-db` | `reset_db.sh` | Reset the database from an SQL dump in the current directory. Use `--update` to also sync Odoo source and refresh the dump. |
@@ -36,6 +36,27 @@ odoo-test --test mymodule
 | `odoo-sync` | `sync.sh` | Compare DB records against XML data files (preview/update). |
 | `odoo-direct-init` | `init-direct.sh` | Add odoo-direct JSON-RPC credentials to `.env` in the current directory. Interactive prompts for URL, DB, user, and API key. |
 | `odoo-direct` | `direct.sh` | AI-agent tool for direct Odoo JSON-RPC access. Uses credentials from `.env`. Supports `--test` to verify the connection. |
+
+### AI-Agent Mode (`--agent`)
+
+When running tests from an AI agent or CI pipeline, use the `--agent` flag to suppress all wrapper chatter (banners, separators, module lists, and `Done!`). Only the raw Odoo test-runner output is emitted, making assertions and tracebacks easy to parse.
+
+```bash
+# Clean, parseable test output — no wrapper banners
+odoo-test --test mymodule --agent
+
+# With file logging (independent of --agent)
+odoo-test --test mymodule --agent --log
+
+# Custom config
+odoo-test --test mymodule --conf docs/utils/odoo.conf --agent
+```
+
+Key behaviours in `--agent` mode:
+- **No decorative output** — banners, separators, warnings, and `Done!` are suppressed.
+- **Real exit codes** — `odoo-bin` exit status propagates directly (no bash pipe swallowing failures).
+- **Native `--logfile`** — when `--log` is also given, Odoo’s native `--logfile` is used instead of a brittle bash filter, so stdout stays clean.
+- **Config always loaded** — `-c odoo.conf` is passed to every invocation so log levels and limits are respected.
 
 ### Helper Scripts
 
