@@ -34,6 +34,8 @@ odoo-test --test mymodule
 | `odoo-cloc` | `cloc.sh` | Count lines of code for all project modules via `odoo-bin cloc`. |
 | `odoo-lint` | `python-lint.sh` | Run ruff, vulture, and radon on project modules. Use `--fix` to auto-fix. |
 | `odoo-sync` | `sync.sh` | Compare DB records against XML data files (preview/update). |
+| `odoo-direct-init` | `init-direct.sh` | Add odoo-direct JSON-RPC credentials to `.env` in the current directory. Interactive prompts for URL, DB, user, and API key. |
+| `odoo-direct` | `direct.sh` | AI-agent tool for direct Odoo JSON-RPC access. Uses credentials from `.env`. Supports `--test` to verify the connection. |
 
 ### Helper Scripts
 
@@ -59,6 +61,10 @@ odoo-test --test mymodule
 | `HTTP_PORT` | Odoo HTTP port |
 | `ODOO_SYNC_SCRIPT` | Optional path to a script that syncs/refreshes the Odoo source tree |
 | `INIT_MODULES` | Optional comma-separated modules for `init.sh` (default: `base`) |
+| `ODOO_DIRECT_URL` | Odoo instance URL for odoo-direct (e.g. `https://mycompany.odoo.com`) |
+| `ODOO_DIRECT_DB` | Database name for odoo-direct |
+| `ODOO_DIRECT_USER` | Username (email) for odoo-direct |
+| `ODOO_DIRECT_API_KEY` | API key for odoo-direct |
 
 All scripts resolve paths relative to the repo root, so the project can be moved without changing `.env`.
 
@@ -80,6 +86,24 @@ Each wrapper script simply calls the actual script in this repository. For examp
 #!/bin/bash
 exec /path/to/odoo-scripts/run.sh "$@"
 ```
+
+## Odoo Direct (JSON-RPC)
+
+For AI-agent access to a remote Odoo instance via JSON-RPC:
+
+```bash
+# 1. Configure credentials (adds to .env in current directory)
+odoo-direct-init
+
+# 2. Test the connection
+odoo-direct --test
+
+# 3. Use from Python scripts
+from odoo_direct import odoo
+partners = odoo.search_read('res.partner', [], ['name'])
+```
+
+`odoo-direct-init` requires an existing `.env` (run `odoo-init-env` first). It writes `ODOO_DIRECT_URL`, `ODOO_DIRECT_DB`, `ODOO_DIRECT_USER`, and `ODOO_DIRECT_API_KEY` to `.env`.
 
 ## Key Behavior
 

@@ -66,14 +66,6 @@ usage() {
     exit 0
 }
 
-get_db_name() {
-    if [ -f "$CONF_FILE" ]; then
-        grep -E "^db_name" "$CONF_FILE" | cut -d'=' -f2 | tr -d ' '
-    else
-        echo "$PROJECT_NAME"
-    fi
-}
-
 # ---------------------------------------------------------------------------
 # HOOT hash helpers — compute hashes for JS unit-test filtering so that
 # --test-js only runs tests from the requested module(s).
@@ -218,13 +210,6 @@ run_test_with_log() {
     fi
 }
 
-DB_NAME=$(get_db_name)
-
-if [[ -z "$DB_NAME" ]]; then
-    echo "Error: Could not find db_name in config file"
-    exit 1
-fi
-
 MODULES_SQL_LIST=$(echo "$ALL_MODULES" | tr ' ' ',' | sed "s/[^,]*/'\&'/g")
 
 case $COMMAND in
@@ -343,11 +328,11 @@ case $COMMAND in
                 TEST_TAG="/${MODULE}:${TEST}"
             fi
 
-            run_test_with_log "$ODOO_BIN" -c "$CONF_FILE" -u "$MODULE" --test-enable --test-tags="$TEST_TAG" --stop-after-init
+            run_test_with_log "$ODOO_BIN" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" -u "$MODULE" --test-enable --test-tags="$TEST_TAG" --stop-after-init
         else
             echo "Running all tests for module: $MODULE"
             echo "================================================================================"
-            run_test_with_log "$ODOO_BIN" -c "$CONF_FILE" -u "$MODULE" --test-enable --test-tags="/${MODULE}" --stop-after-init
+            run_test_with_log "$ODOO_BIN" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" -u "$MODULE" --test-enable --test-tags="/${MODULE}" --stop-after-init
         fi
         ;;
 
@@ -357,10 +342,17 @@ case $COMMAND in
         echo "================================================================================"
         ALL_MODULES_LIST=$(echo "$ALL_MODULES" | tr ' ' ',')
         ALL_TAGS=$(echo "$ALL_MODULES" | tr ' ' '\n' | sed 's|^|/|' | tr '\n' ',' | sed 's/,$//')
-        run_test_with_log "$ODOO_BIN" -c "$CONF_FILE" -u "$ALL_MODULES_LIST" --test-enable --test-tags="$ALL_TAGS" --stop-after-init
+        run_test_with_log "$ODOO_BIN" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" -u "$ALL_MODULES_LIST" --test-enable --test-tags="$ALL_TAGS" --stop-after-init
         ;;
 
     test-js)
+        # Check for websocket-client needed by JS HOOT tests
+        if ! "$PYTHON_PATH"/python -c "import websocket" 2>/dev/null; then
+            echo "Error: websocket-client not installed. JS HOOT tests cannot run."
+            echo "Run: odoo-init  (or: pip install websocket-client)"
+            exit 1
+        fi
+
         if [[ -n "$MODULE" ]]; then
             echo "Running JS unit tests for module: $MODULE"
             echo "================================================================================"
@@ -372,7 +364,7 @@ case $COMMAND in
             else
                 TAG="-at_install,web:WebSuite.test_unit_desktop[${HOOT_FILTER}]"
             fi
-            run_test_with_log "$ODOO_BIN" -c "$CONF_FILE" --test-enable --test-tags="$TAG" --stop-after-init
+            run_test_with_log "$ODOO_BIN" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" --test-enable --test-tags="$TAG" --stop-after-init
         else
             echo "Running JS unit tests for all project modules"
             echo "================================================================================"
@@ -393,7 +385,7 @@ case $COMMAND in
             else
                 TAG="-at_install,web:WebSuite.test_unit_desktop[${ALL_FILTER}]"
             fi
-            run_test_with_log "$ODOO_BIN" -c "$CONF_FILE" --test-enable --test-tags="$TAG" --stop-after-init
+            run_test_with_log "$ODOO_BIN" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" --test-enable --test-tags="$TAG" --stop-after-init
         fi
         ;;
 
@@ -402,7 +394,7 @@ case $COMMAND in
         echo "Modules: $ALL_MODULES"
         echo "================================================================================"
         ALL_MODULES_LIST=$(echo "$ALL_MODULES" | tr ' ' ',')
-        run_test_with_log "$ODOO_BIN" -c "$CONF_FILE" --test-enable --test-tags="-at_install,web:WebSuite.test_unit_desktop" --stop-after-init
+        run_test_with_log "$ODOO_BIN" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" --test-enable --test-tags="-at_install,web:WebSuite.test_unit_desktop" --stop-after-init
         ;;
 
     *)
