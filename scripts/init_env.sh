@@ -1,12 +1,19 @@
 #!/bin/bash
 # init_env.sh — Bootstrap environment for Odoo project
 #
-# Usage:
-#   odoo-init-env                    # Generate .env + odoo.conf (interactive prompts)
-#   odoo-init-env --force            # Overwrite existing files (backs up to .bak)
-#   odoo-init-env --venv-create      # Also create Python venv + install deps
-#   odoo-init-env --venv-only        # Verify/create venv, update PYTHON_PATH
-#   odoo-init-env --update-conf      # Regenerate odoo.conf from existing .env
+# This script manages TWO separate things:
+#   1. CONFIG FILES: .env and odoo.conf (text configuration files)
+#   2. PYTHON VENV:  .venv/ directory (Python virtual environment with binaries)
+#
+# CONFIG FILE OPERATIONS (affects .env, odoo.conf):
+#   odoo-init-env                     # Full interactive setup
+#   odoo-init-env --config-recreate   # Overwrite existing files (backs up to .bak)
+#   odoo-init-env --conf-only         # Regenerate odoo.conf from existing .env
+#
+# PYTHON VENV OPERATIONS (affects .venv/ directory):
+#   odoo-init-env --venv-create       # Create Python venv + install dependencies
+#   odoo-init-env --venv-only         # Verify/create venv, update PYTHON_PATH in .env
+#   odoo-init-env --venv-recreate     # Delete and recreate venv (fixes broken paths)
 #
 # IMPORTANT: .env and odoo.conf are ALWAYS created in the CURRENT DIRECTORY ($PWD).
 
@@ -18,23 +25,62 @@ PROJECT_ROOT="$ENV_DIR"
 ENV_FILE="$ENV_DIR/.env"
 CONF_FILE="$ENV_DIR/odoo.conf"
 
-FORCE=false
+# Mode flags
+CONFIG_RECREATE=false
+CONF_ONLY=false
 VENV_CREATE=false
 VENV_ONLY=false
-UPDATE_CONF_ONLY=false
+VENV_RECREATE=false
 
 # ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
 for arg in "$@"; do
     case "$arg" in
-        --force) FORCE=true ;;
-        --venv-create) VENV_CREATE=true ;;
-        --venv-only) VENV_ONLY=true ;;
-        --update-conf) UPDATE_CONF_ONLY=true ;;
+        # Config file operations
+        --config-recreate)
+            CONFIG_RECREATE=true
+            ;;
+        --conf-only)
+            CONF_ONLY=true
+            ;;
+        # Python venv operations
+        --venv-create)
+            VENV_CREATE=true
+            ;;
+        --venv-only)
+            VENV_ONLY=true
+            ;;
+        --venv-recreate)
+            VENV_RECREATE=true
+            ;;
+        -h|--help)
+            cat << 'HELP'
+Usage: odoo-init-env [OPTION]
+
+CONFIG FILE OPERATIONS (.env, odoo.conf):
+  (no args)              Create .env + odoo.conf with interactive prompts
+  --config-recreate      Overwrite existing config files (backs up to .bak)
+  --conf-only            Regenerate odoo.conf from existing .env
+
+PYTHON VENV OPERATIONS (.venv/):
+  --venv-create          Create Python venv + install dependencies
+  --venv-only            Verify/create venv, update PYTHON_PATH in .env
+  --venv-recreate        Delete and recreate venv (fixes broken paths)
+
+EXAMPLES:
+  odoo-init-env                          # First time setup
+  odoo-init-env --config-recreate        # Reset config files
+  odoo-init-env --conf-only              # Update odoo.conf from .env
+  odoo-init-env --venv-create            # Create venv after config exists
+  odoo-init-env --venv-recreate          # Fix broken venv paths
+
+HELP
+            exit 0
+            ;;
         *)
             echo "Unknown option: $arg"
-            echo "Usage: $0 [--force] [--venv-create] [--venv-only] [--update-conf]"
+            echo "Run 'odoo-init-env --help' for usage information"
             exit 1
             ;;
     esac
@@ -118,11 +164,11 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# --update-conf only
+# --conf-only: Regenerate odoo.conf from existing .env
 # ---------------------------------------------------------------------------
-if $UPDATE_CONF_ONLY; then
+if $CONF_ONLY; then
     if [[ ! -f "$ENV_FILE" ]]; then
-        echo "Error: $ENV_FILE not found. Run without --update-conf first."
+        echo "Error: $ENV_FILE not found. Run without --conf-only first."
         exit 1
     fi
     echo "Regenerating $CONF_FILE from $ENV_FILE..."
@@ -165,6 +211,58 @@ if $VENV_ONLY; then
 fi
 
 # ---------------------------------------------------------------------------
+# --venv-recreate
+# ---------------------------------------------------------------------------
+if $VENV_RECREATE; then
+    # Load from existing .env if available
+    if [[ -f "$ENV_FILE" ]]; then
+        set -a
+        source "$ENV_FILE"
+        set +a
+        PROJECT_ROOT="${PROJECT_ROOT:-$ENV_DIR}"
+    fi
+
+    VENV_DIR="$PROJECT_ROOT/.venv"
+    if [[ -d "$VENV_DIR" ]]; then
+        echo "Removing broken venv at $VENV_DIR..."
+        rm -rf "$VENV_DIR"
+    fi
+    echo "Creating fresh Python venv at $VENV_DIR..."
+    python3 -m venv "$VENV_DIR"
+
+    REQUIREMENTS="$ODOO_ROOT/odoo/requirements.txt"
+    if [[ ! -f "$REQUIREMENTS" ]]; then
+        REQUIREMENTS="$ODOO_ROOT/requirements.txt"
+    fi
+    if [[ -f "$REQUIREMENTS" ]]; then
+        echo "Installing requirements from $REQUIREMENTS..."
+        "$VENV_DIR/bin/pip" install --upgrade pip
+        "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS"
+    else
+        echo "Warning: requirements.txt not found at $ODOO_ROOT/odoo/requirements.txt or $ODOO_ROOT/requirements.txt"
+    fi
+
+    # Install websocket-client for JS HOOT tests
+    echo "Checking websocket-client installation..."
+    if ! "$VENV_DIR/bin/python" -c "import websocket" 2>/dev/null; then
+        echo "Installing websocket-client..."
+        "$VENV_DIR/bin/pip" install websocket-client
+    else
+        echo "websocket-client already installed"
+    fi
+
+    # Ensure .env PYTHON_PATH points to the new venv
+    if [[ -f "$ENV_FILE" ]]; then
+        backup_file "$ENV_FILE"
+        sed -i "s|PYTHON_PATH=.*|PYTHON_PATH=$VENV_DIR/bin|" "$ENV_FILE"
+        echo "Updated PYTHON_PATH in $ENV_FILE"
+    fi
+
+    echo "Done. Venv recreated with working paths."
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
 # Determine defaults
 # ---------------------------------------------------------------------------
 DEFAULT_ODOO_ROOT="$HOME/Odoo/V19"
@@ -185,7 +283,7 @@ DEFAULT_ODOO_SYNC_SCRIPT="rsync-v19.sh"
 # Read existing .env if present (always load as defaults)
 # ---------------------------------------------------------------------------
 if [[ -f "$ENV_FILE" ]]; then
-    if ! $FORCE; then
+    if ! $CONFIG_RECREATE; then
         echo "Found existing $ENV_FILE — loading defaults from it."
     fi
     set -a
@@ -236,10 +334,10 @@ DB_NAME="$PROJECT_NAME"
 # Write .env
 # ---------------------------------------------------------------------------
 if [[ -f "$ENV_FILE" ]]; then
-    if $FORCE; then
+    if $CONFIG_RECREATE; then
         backup_file "$ENV_FILE"
     else
-        echo "Error: $ENV_FILE already exists. Use --force to overwrite (with backup)."
+        echo "Error: $ENV_FILE already exists. Use --config-recreate to overwrite (with backup)."
         exit 1
     fi
 fi
@@ -332,7 +430,7 @@ echo "Written: $ENV_FILE"
 # ---------------------------------------------------------------------------
 # Generate odoo.conf
 # ---------------------------------------------------------------------------
-if [[ -f "$CONF_FILE" ]] && $FORCE; then
+if [[ -f "$CONF_FILE" ]] && $CONFIG_RECREATE; then
     backup_file "$CONF_FILE"
 fi
 
@@ -360,6 +458,15 @@ if $VENV_CREATE; then
         "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS"
     else
         echo "Warning: requirements.txt not found at $ODOO_ROOT/odoo/requirements.txt or $ODOO_ROOT/requirements.txt"
+    fi
+
+    # Install websocket-client for JS HOOT tests (verbose)
+    echo "Checking websocket-client installation..."
+    if ! "$VENV_DIR/bin/python" -c "import websocket" 2>/dev/null; then
+        echo "Installing websocket-client..."
+        "$VENV_DIR/bin/pip" install websocket-client
+    else
+        echo "websocket-client already installed"
     fi
 
     # Ensure .env PYTHON_PATH points to the new venv

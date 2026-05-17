@@ -18,6 +18,8 @@ Scripts are installed as **wrapper scripts** in `~/.local/share/odoo/bin/` for g
 | `odoo-lint` | `python-lint.sh` |
 | `odoo-cloc` | `cloc.sh` |
 | `odoo-sync` | `sync.sh` |
+| `odoo-direct-init` | `init-direct.sh` |
+| `odoo-direct` | `direct.sh` |
 
 **Path requirement:** `~/.local/share/odoo/bin` should be in `$PATH`.
 
@@ -74,6 +76,10 @@ odoo-fresh                        # Quick DB refresh from dump in current direct
 odoo-lint                         # ruff + vulture + radon on project modules
 odoo-lint --fix                   # Auto-fix issues
 odoo-lint --module <name>         # Single module only
+
+# Odoo Direct (JSON-RPC agent access)
+odoo-direct-init                  # Add odoo-direct credentials to .env (interactive)
+odoo-direct --test                # Test connection using .env credentials
 ```
 
 ## Testing Quirks
@@ -114,6 +120,17 @@ project-root/
 ```
 
 **Important:** `.env` and `odoo.conf` are always in the directory from which you run the commands.
+
+## Odoo Direct Environment Variables
+
+`odoo-direct-init` writes these to `.env` for use by `odoo-direct`:
+
+| Var | Description |
+|-----|-------------|
+| `ODOO_DIRECT_URL` | Odoo instance URL (e.g. `https://mycompany.odoo.com`) |
+| `ODOO_DIRECT_DB` | Database name |
+| `ODOO_DIRECT_USER` | Username (email) |
+| `ODOO_DIRECT_API_KEY` | API key (not password) |
 
 ## Important Defaults
 

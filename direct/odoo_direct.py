@@ -5,6 +5,7 @@ Configuration loading + JSON-RPC client in one file
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -29,38 +30,54 @@ class OdooConfigError(OdooError):
 class OdooDirect:
     """Simple Odoo JSON-RPC client with built-in config loading."""
     
-    def __init__(self, config_path=None, timeout=30):
-        """Initialize from config.json
+    def __init__(self, config_path=None, config=None, timeout=30):
+        """Initialize from config dict, config file, or environment variables.
         
         Args:
             config_path: Path to config.json (default: same dir as this file)
+            config: Configuration dict with keys: url, database, username, api_key
             timeout: Request timeout in seconds
         """
-        # Load config
-        if config_path is None:
-            config_path = Path(__file__).parent / 'config.json'
+        cfg = {}
+        
+        if config is not None:
+            cfg = dict(config)
         else:
-            config_path = Path(config_path)
+            # Try config file
+            if config_path is None:
+                config_path = Path(__file__).parent / 'config.json'
+            else:
+                config_path = Path(config_path)
+            
+            if config_path.exists():
+                try:
+                    with open(config_path, 'r') as f:
+                        cfg = json.load(f)
+                except json.JSONDecodeError as e:
+                    raise OdooConfigError(f"Invalid JSON: {e}")
         
-        if not config_path.exists():
-            raise OdooConfigError(f"Config file not found: {config_path}")
-        
-        try:
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-        except json.JSONDecodeError as e:
-            raise OdooConfigError(f"Invalid JSON: {e}")
+        # Environment variables always override file/config values
+        env_map = {
+            'url': 'ODOO_DIRECT_URL',
+            'database': 'ODOO_DIRECT_DB',
+            'username': 'ODOO_DIRECT_USER',
+            'api_key': 'ODOO_DIRECT_API_KEY',
+        }
+        for key, env_var in env_map.items():
+            val = os.environ.get(env_var, '')
+            if val:
+                cfg[key] = val
         
         # Validate required fields
         required = ['url', 'database', 'username', 'api_key']
-        missing = [f for f in required if not config.get(f)]
+        missing = [f for f in required if not cfg.get(f)]
         if missing:
             raise OdooConfigError(f"Missing fields: {', '.join(missing)}")
         
-        self.url = config['url'].rstrip('/')
-        self.database = config['database']
-        self.username = config['username']
-        self.api_key = config['api_key']
+        self.url = cfg['url'].rstrip('/')
+        self.database = cfg['database']
+        self.username = cfg['username']
+        self.api_key = cfg['api_key']
         self.timeout = timeout
         
         self._uid = None
@@ -198,5 +215,24 @@ class OdooDirect:
         return self._execute(model, method, args, kwargs)
 
 
-# Create global instance
-odoo = OdooDirect()
+# Create global instance (lazy — safe to import even without config)
+_odoo_instance = None
+
+def _get_odoo():
+    global _odoo_instance
+    if _odoo_instance is None:
+        _odoo_instance = OdooDirect()
+    return _odoo_instance
+
+
+class _OdooProxy:
+    """Proxy that delegates all attribute access to the lazy global instance."""
+    
+    def __getattr__(self, name):
+        return getattr(_get_odoo(), name)
+    
+    def __setattr__(self, name, value):
+        return setattr(_get_odoo(), name, value)
+
+
+odoo = _OdooProxy()

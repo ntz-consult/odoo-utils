@@ -21,14 +21,6 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
-get_db_name() {
-    if [ -f "$CONF_FILE" ]; then
-        grep -E "^db_name" "$CONF_FILE" | cut -d'=' -f2 | tr -d ' '
-    else
-        echo "$PROJECT_NAME"
-    fi
-}
-
 get_module_state() {
     local module="$1"
     psql "$DB_NAME" -t -c "SELECT state FROM ir_module_module WHERE name = '$module';" 2>/dev/null | tr -d ' '
@@ -36,7 +28,11 @@ get_module_state() {
 
 get_all_modules() {
     local path="$1"
-    find "$path" -maxdepth 1 -type d ! -name ".*" ! -path "$path" | xargs -I {} basename {} | sort -u
+    find "$path" -maxdepth 1 -type d ! -name ".*" ! -path "$path" | while read -r dir; do
+        if [ -f "$dir/__manifest__.py" ] || [ -f "$dir/__openerp__.py" ]; then
+            basename "$dir"
+        fi
+    done | sort -u
 }
 
 module_exists_in_folder() {
@@ -154,6 +150,38 @@ install_all_uninstalled() {
     echo "Install complete!"
 }
 
+update_all_modules() {
+    MODULES_LIST=$(get_all_modules "$ADDONS_PATH")
+
+    TO_UPDATE=""
+
+    for module in $MODULES_LIST; do
+        state=$(get_module_state "$module")
+
+        if [ "$state" = "installed" ]; then
+            echo "Module $module: installed (will update)"
+            TO_UPDATE="${TO_UPDATE:+$TO_UPDATE,}$module"
+        else
+            echo "Module $module: $state (skipping)"
+        fi
+    done
+
+    if [ -z "$TO_UPDATE" ]; then
+        echo ""
+        echo "No installed modules to update."
+        exit 0
+    fi
+
+    echo ""
+    echo "Using configuration: $CONF_FILE"
+    echo ""
+    echo "Updating modules: $TO_UPDATE"
+    echo "--------------------------------------------------------------------------------"
+    "$ODOO_BIN" -c "$CONF_FILE" -u "$TO_UPDATE" --stop-after-init
+    echo ""
+    echo "Update complete!"
+}
+
 show_usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
@@ -164,11 +192,11 @@ show_usage() {
     echo "  --install <module_name>  Install a single module"
     echo "  --uninstall <module_name> Uninstall a single module"
     echo "  --update <module_name>   Update a single module (must be already installed)"
+    echo "  --update-all             Update all installed modules"
     echo "  -h, --help               Show this help message"
     echo ""
     echo "Environment:"
     echo "  ODOO_ROOT=$ODOO_ROOT"
-    echo "  PROJECT_ROOT=$PROJECT_ROOT"
     echo "  PROJECT_NAME=$PROJECT_NAME"
     echo "  PYTHON_PATH=$PYTHON_PATH"
     echo ""
@@ -176,13 +204,6 @@ show_usage() {
 }
 
 ADDONS_PATH="$PROJECT_ROOT"
-
-DB_NAME=$(get_db_name)
-
-if [ -z "$DB_NAME" ]; then
-    echo "Error: Could not find db_name in config file"
-    exit 1
-fi
 
 ACTION=""
 MODULE_ARG=""
@@ -215,6 +236,10 @@ while [ $# -gt 0 ]; do
             ACTION="update"
             MODULE_ARG="$2"
             shift 2
+            ;;
+        --update-all)
+            ACTION="update-all"
+            shift
             ;;
         -h|--help)
             show_usage
@@ -255,6 +280,9 @@ case "$ACTION" in
             exit 1
         fi
         update_single_module "$MODULE_ARG"
+        ;;
+    update-all)
+        update_all_modules
         ;;
     *)
         show_usage

@@ -61,6 +61,36 @@ if [ ! -f "$CONF_FILE" ]; then
     exit 1
 fi
 
+# Validate Python environment has required dependencies
+PYTHON_EXE="$PYTHON_PATH/python"
+if [ ! -x "$PYTHON_EXE" ]; then
+    echo "Error: Python executable not found: $PYTHON_EXE"
+    echo "Check PYTHON_PATH in $ENV_FILE"
+    exit 1
+fi
+
+# Check for key Odoo dependencies
+REQUIRED_MODULES=("babel" "lxml" "psycopg2" "werkzeug")
+MISSING_MODULES=()
+for mod in "${REQUIRED_MODULES[@]}"; do
+    if ! "$PYTHON_EXE" -c "import $mod" 2>/dev/null; then
+        MISSING_MODULES+=("$mod")
+    fi
+done
+
+if [ ${#MISSING_MODULES[@]} -gt 0 ]; then
+    echo "Error: Python environment is missing required dependencies:"
+    printf '  - %s\n' "${MISSING_MODULES[@]}"
+    echo ""
+    echo "The virtual environment may have been created with a different directory path."
+    echo "To fix this, recreate the venv:"
+    echo "  odoo-init-env --venv-recreate"
+    echo ""
+    echo "Or manually install dependencies:"
+    echo "  $PYTHON_PATH/pip install -r \$ODOO_ROOT/odoo/requirements.txt"
+    exit 1
+fi
+
 # Interactive module selection
 if [ "$MODULES_FROM_CLI" = false ] && [ -t 0 ]; then
     echo "Initializing database: $DB_NAME"
