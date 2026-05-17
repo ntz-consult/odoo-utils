@@ -4,13 +4,15 @@
 #
 # Usage:
 #   odoo-test --list                        # List all installed modules
-#   odoo-test --list-tests <mod> [file]      # List test files and classes
+#   odoo-test --list-tests <mod> [file]    # List test files and classes
 #   odoo-test --test <mod> [file:class.test]   # Run Python tests
 #   odoo-test --testall                     # Run all Python tests for all modules
 #   odoo-test --test-js [mod]               # Run JS unit tests (fast, no module update)
 #   odoo-test --test-js-all                 # Run JS unit tests for all modules (full suite)
 #   odoo-test --log [filename]              # Log output to file
 #   odoo-test --path <directory>            # Custom addons path
+#   odoo-test --agent                       # Suppress wrapper output for AI agents
+#   odoo-test --conf <file.conf>            # Use custom config file
 #
 # Environment (see .env in current directory):
 #   ODOO_ROOT    - Odoo source root
@@ -43,6 +45,8 @@ usage() {
     echo "  --test-js [mod]              Run JS unit tests for project module(s)"
     echo "  --test-js-all                Run JS unit tests for all modules"
     echo "  --log [filename]              Log output to file (default: ${PROJECT_NAME}_test.log in current dir)"
+    echo "  --agent                        Suppress wrapper output for AI agents"
+    echo "  --conf <file.conf>            Use custom config file"
     echo "  --help                        Show this help message"
     echo ""
     echo "Environment:"
@@ -63,6 +67,7 @@ usage() {
     echo "  $0 --test-js                                   # Run JS unit tests (project modules only)"
     echo "  $0 --test-js mymodule                          # Run JS unit tests for one module"
     echo "  $0 --test-js-all                               # Run JS unit tests for all modules (full suite, SLOW)"
+    echo "  $0 --test mymodule --agent                     # Run tests, suppress wrapper output"
     exit 0
 }
 
@@ -101,6 +106,8 @@ MODULE=""
 TEST=""
 FILE=""
 USE_LOGFILE=false
+AGENT_MODE=false
+CUSTOM_CONF=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -165,6 +172,14 @@ while [[ $# -gt 0 ]]; do
                 shift
             fi
             ;;
+        --agent)
+            AGENT_MODE=true
+            shift
+            ;;
+        --conf)
+            CUSTOM_CONF="$2"
+            shift 2
+            ;;
         --help|-h)
             usage
             ;;
@@ -175,6 +190,10 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ -n "$CUSTOM_CONF" ]]; then
+    CONF_FILE="$CUSTOM_CONF"
+fi
+
 if [[ -z "$COMMAND" ]]; then
     echo "Error: No command specified"
     usage
@@ -183,28 +202,10 @@ fi
 run_test_with_log() {
     if [[ "$USE_LOGFILE" == "true" ]]; then
         rm -f "$LOG_FILE"
-        echo "Running tests with logging to: $LOG_FILE (failures only)"
-        echo ""
-        local in_traceback=false
-        local capture_next=false
-        "$@" 2>&1 | while IFS= read -r line; do
-            echo "$line"
-            if [[ "$line" =~ (FAIL|FAILED|ERROR|AssertionError|Traceback) ]]; then
-                echo "$line" >> "$LOG_FILE"
-                in_traceback=true
-                capture_next=true
-            elif [[ "$in_traceback" == "true" && "$line" =~ ^[[:space:]] ]]; then
-                echo "$line" >> "$LOG_FILE"
-            elif [[ "$capture_next" == "true" && ! "$line" =~ ^[[:space:]] ]]; then
-                if [[ "$line" =~ ^(test_|=) ]]; then
-                    echo "$line" >> "$LOG_FILE"
-                fi
-                in_traceback=false
-                capture_next=false
-            else
-                in_traceback=false
-            fi
-        done
+        if [[ "$AGENT_MODE" != "true" ]]; then
+            echo "Logging test output to: $LOG_FILE"
+        fi
+        "$@" --logfile="$LOG_FILE"
     else
         "$@"
     fi
@@ -283,8 +284,10 @@ case $COMMAND in
         fi
 
         if [[ -n "$TEST" ]]; then
-            echo "Running test: $TEST in module: $MODULE"
-            echo "================================================================================"
+            if [[ "$AGENT_MODE" != "true" ]]; then
+                echo "Running test: $TEST in module: $MODULE"
+                echo "================================================================================"
+            fi
 
             if [[ "$TEST" =~ ^([^:]+)\.py:([^:]+)\.(.+)$ ]]; then
                 FILE="${BASH_REMATCH[1]}.py"
@@ -328,21 +331,25 @@ case $COMMAND in
                 TEST_TAG="/${MODULE}:${TEST}"
             fi
 
-            run_test_with_log "$ODOO_BIN" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" -u "$MODULE" --test-enable --test-tags="$TEST_TAG" --stop-after-init
+            run_test_with_log "$ODOO_BIN" -c "$CONF_FILE" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" -u "$MODULE" --test-enable --test-tags="$TEST_TAG" --stop-after-init
         else
-            echo "Running all tests for module: $MODULE"
-            echo "================================================================================"
-            run_test_with_log "$ODOO_BIN" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" -u "$MODULE" --test-enable --test-tags="/${MODULE}" --stop-after-init
+            if [[ "$AGENT_MODE" != "true" ]]; then
+                echo "Running all tests for module: $MODULE"
+                echo "================================================================================"
+            fi
+            run_test_with_log "$ODOO_BIN" -c "$CONF_FILE" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" -u "$MODULE" --test-enable --test-tags="/${MODULE}" --stop-after-init
         fi
         ;;
 
     testall)
-        echo "Running all tests for all modules"
-        echo "Modules: $ALL_MODULES"
-        echo "================================================================================"
+        if [[ "$AGENT_MODE" != "true" ]]; then
+            echo "Running all tests for all modules"
+            echo "Modules: $ALL_MODULES"
+            echo "================================================================================"
+        fi
         ALL_MODULES_LIST=$(echo "$ALL_MODULES" | tr ' ' ',')
         ALL_TAGS=$(echo "$ALL_MODULES" | tr ' ' '\n' | sed 's|^|/|' | tr '\n' ',' | sed 's/,$//')
-        run_test_with_log "$ODOO_BIN" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" -u "$ALL_MODULES_LIST" --test-enable --test-tags="$ALL_TAGS" --stop-after-init
+        run_test_with_log "$ODOO_BIN" -c "$CONF_FILE" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" -u "$ALL_MODULES_LIST" --test-enable --test-tags="$ALL_TAGS" --stop-after-init
         ;;
 
     test-js)
@@ -354,20 +361,26 @@ case $COMMAND in
         fi
 
         if [[ -n "$MODULE" ]]; then
-            echo "Running JS unit tests for module: $MODULE"
-            echo "================================================================================"
+            if [[ "$AGENT_MODE" != "true" ]]; then
+                echo "Running JS unit tests for module: $MODULE"
+                echo "================================================================================"
+            fi
             HOOT_FILTER=$(build_hoot_filter_for_module "$MODULE")
             if [[ -z "$HOOT_FILTER" ]]; then
-                echo "Warning: No .test.js files found in $MODULE/static/tests/"
-                echo "Falling back to full desktop suite."
+                if [[ "$AGENT_MODE" != "true" ]]; then
+                    echo "Warning: No .test.js files found in $MODULE/static/tests/"
+                    echo "Falling back to full desktop suite."
+                fi
                 TAG="-at_install,web:WebSuite.test_unit_desktop"
             else
                 TAG="-at_install,web:WebSuite.test_unit_desktop[${HOOT_FILTER}]"
             fi
-            run_test_with_log "$ODOO_BIN" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" --test-enable --test-tags="$TAG" --stop-after-init
+            run_test_with_log "$ODOO_BIN" -c "$CONF_FILE" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" --test-enable --test-tags="$TAG" --stop-after-init
         else
-            echo "Running JS unit tests for all project modules"
-            echo "================================================================================"
+            if [[ "$AGENT_MODE" != "true" ]]; then
+                echo "Running JS unit tests for all project modules"
+                echo "================================================================================"
+            fi
             ALL_FILTER=""
             for mod in $ALL_MODULES; do
                 mod_filter=$(build_hoot_filter_for_module "$mod")
@@ -380,21 +393,25 @@ case $COMMAND in
                 fi
             done
             if [[ -z "$ALL_FILTER" ]]; then
-                echo "Warning: No .test.js files found in any project module."
+                if [[ "$AGENT_MODE" != "true" ]]; then
+                    echo "Warning: No .test.js files found in any project module."
+                fi
                 TAG="-at_install,web:WebSuite.test_unit_desktop"
             else
                 TAG="-at_install,web:WebSuite.test_unit_desktop[${ALL_FILTER}]"
             fi
-            run_test_with_log "$ODOO_BIN" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" --test-enable --test-tags="$TAG" --stop-after-init
+            run_test_with_log "$ODOO_BIN" -c "$CONF_FILE" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" --test-enable --test-tags="$TAG" --stop-after-init
         fi
         ;;
 
     test-js-all)
-        echo "Running JS unit tests for all modules"
-        echo "Modules: $ALL_MODULES"
-        echo "================================================================================"
+        if [[ "$AGENT_MODE" != "true" ]]; then
+            echo "Running JS unit tests for all modules"
+            echo "Modules: $ALL_MODULES"
+            echo "================================================================================"
+        fi
         ALL_MODULES_LIST=$(echo "$ALL_MODULES" | tr ' ' ',')
-        run_test_with_log "$ODOO_BIN" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" --test-enable --test-tags="-at_install,web:WebSuite.test_unit_desktop" --stop-after-init
+        run_test_with_log "$ODOO_BIN" -c "$CONF_FILE" --no-http -d "$DB_NAME" --addons-path "$ADDONS_PATH" --test-enable --test-tags="-at_install,web:WebSuite.test_unit_desktop" --stop-after-init
         ;;
 
     *)
@@ -403,5 +420,7 @@ case $COMMAND in
         ;;
 esac
 
-echo ""
-echo "Done!"
+if [[ "$AGENT_MODE" != "true" ]]; then
+    echo ""
+    echo "Done!"
+fi
