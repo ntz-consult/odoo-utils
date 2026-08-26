@@ -9,4 +9,4 @@ Credentials stay in ignored `.odoo/secrets.env`; linked worktrees use an explici
 ignored `.odoo/worktree.yaml` allocation.
 
 See [scripts/README.md](scripts/README.md) for runtime commands and
-[direct/README.md](direct/README.md) for named JSON-2 targets.
+[direct/README.md](direct/README.md) for named Odoo targets.

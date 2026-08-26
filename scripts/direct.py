@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from odoo_direct import OdooAuthError, OdooConfigError, OdooDirect, OdooError
+from odoo_direct import OdooAuthError, OdooConfigError, OdooDirect, OdooError, OdooXmlRpc
 
 
 MAX_ROWS = 50
@@ -97,7 +97,7 @@ def resolve_policy(config: dict, target_name: str, operation: str) -> str:
     return policy
 
 
-def target_client(config: dict, target_name: str) -> tuple[OdooDirect, dict[str, str], str]:
+def target_client(config: dict, target_name: str):
     if not TARGET_NAME_RE.fullmatch(target_name):
         raise TargetError(f"Invalid target name: {target_name!r}")
     targets = config.get("targets")
@@ -110,21 +110,23 @@ def target_client(config: dict, target_name: str) -> tuple[OdooDirect, dict[str,
     version = target.get("odoo_version")
     if not isinstance(version, int):
         raise TargetError(f"Target {target_name!r} must declare integer odoo_version.")
-    if version < 19:
-        raise TargetError(
-            f"Target {target_name!r} runs Odoo {version}, which does not provide the JSON-2 API."
-        )
+    if version < 17:
+        raise TargetError(f"Target {target_name!r} runs unsupported Odoo {version}; minimum is 17.")
     variable = secret_variable(target_name)
     resolved = {
         "url": target.get("url", ""),
         "database": target.get("database", ""),
         "api_key": os.environ.get(variable, ""),
+        "odoo_version": version,
     }
+    if version < 19:
+        resolved["username"] = target.get("username", "")
     missing = [key for key, value in resolved.items() if not value]
     if missing:
         detail = variable if "api_key" in missing else ", ".join(missing)
         raise TargetError(f"Target {target_name!r} is missing configuration: {detail}")
-    return OdooDirect(config=resolved), resolved, target_name
+    client = OdooDirect(config=resolved) if version >= 19 else OdooXmlRpc(config=resolved)
+    return client, resolved, target_name
 
 
 def print_targets(config: dict, as_json: bool) -> None:
@@ -197,9 +199,17 @@ def execute_command(client: OdooDirect, args: argparse.Namespace, policy: str = 
     if args.operation == "read" and not approved:
         return {"status": "approval-required", "operation": "read", "command": args.command}
     if args.command == "test":
+        actual_version = client.server_major_version()
+        if actual_version != client.odoo_version:
+            raise TargetError(
+                f"Target declares Odoo {client.odoo_version}, but the server reports Odoo {actual_version}."
+            )
         context = client.context_get()
         count = client.search_count("res.partner", [])
-        return {"status": "connected", "uid": context.get("uid"), "res.partner count": count}
+        return {
+            "status": "connected", "transport": client.transport,
+            "odoo version": actual_version, "uid": context.get("uid"), "res.partner count": count,
+        }
     if args.command == "search":
         return client.search(args.model, parse_literal(args.domain, "domain", list), limit=args.limit)
     if args.command == "read":
@@ -285,7 +295,7 @@ def execute_command(client: OdooDirect, args: argparse.Namespace, policy: str = 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="odoo-direct",
-        description="Deterministic JSON-2 access to a named target from .odoo/config.yaml.",
+        description="Deterministic Odoo model access to a named target from .odoo/config.yaml.",
     )
     parser.add_argument("--json", action="store_true", help="Emit one machine-readable JSON object")
     parser.add_argument("target", help="Target name declared in .odoo/config.yaml")
@@ -294,7 +304,7 @@ def build_parser() -> argparse.ArgumentParser:
         command_parser.add_argument("--confirm", action="store_true")
         command_parser.set_defaults(operation="read")
 
-    test = subparsers.add_parser("test", help="Verify the selected JSON-2 connection")
+    test = subparsers.add_parser("test", help="Verify the selected connection and Odoo version")
     add_read_approval(test)
     search = subparsers.add_parser("search")
     search.add_argument("model")

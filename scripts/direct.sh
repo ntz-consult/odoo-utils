@@ -1,5 +1,5 @@
 #!/bin/bash
-# direct.sh — Global wrapper for deterministic Odoo 19 JSON-2 access
+# direct.sh — Global wrapper for deterministic Odoo model access
 #
 # Usage:
 #   odoo-direct local test

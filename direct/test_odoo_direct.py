@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Transport tests for the Odoo 19 JSON-2 client."""
+"""Transport tests for the version-specific Odoo clients."""
 
 import io
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 
-from odoo_direct import OdooAuthError, OdooDirect, OdooError, _NoRedirect
+from odoo_direct import OdooAuthError, OdooDirect, OdooError, OdooXmlRpc, _NoRedirect
 
 
 class FakeResponse:
@@ -102,6 +102,54 @@ class Json2ClientTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(OdooError, "upstream unavailable"):
             self.client.search("res.partner", [])
+
+
+class XmlRpcClientTests(unittest.TestCase):
+    def setUp(self):
+        self.client = OdooXmlRpc({
+            "url": "https://legacy.example.com",
+            "database": "legacy-db",
+            "username": "agent@example.com",
+            "api_key": "secret-key",
+            "odoo_version": 17,
+        })
+
+    @patch("odoo_direct.xmlrpc.client.ServerProxy")
+    def test_authenticates_and_reads_through_execute_kw(self, server_proxy):
+        common = MagicMock()
+        common.authenticate.return_value = 7
+        objects = MagicMock()
+        objects.execute_kw.return_value = [{"id": 4, "name": "Acme"}]
+        server_proxy.side_effect = lambda url, **_kwargs: common if url.endswith("/common") else objects
+
+        result = self.client.read("res.partner", [4], ["name"])
+
+        self.assertEqual(result[0]["name"], "Acme")
+        common.authenticate.assert_called_once_with("legacy-db", "agent@example.com", "secret-key", {})
+        objects.execute_kw.assert_called_once_with(
+            "legacy-db", 7, "secret-key", "res.partner", "read", [[4]], {"fields": ["name"]}
+        )
+
+    @patch("odoo_direct.xmlrpc.client.ServerProxy")
+    def test_write_uses_positional_ids_and_values(self, server_proxy):
+        common = MagicMock()
+        common.authenticate.return_value = 7
+        objects = MagicMock()
+        objects.execute_kw.return_value = True
+        server_proxy.side_effect = lambda url, **_kwargs: common if url.endswith("/common") else objects
+
+        self.assertTrue(self.client.write("res.partner", [4], {"name": "After"}))
+
+        objects.execute_kw.assert_called_once_with(
+            "legacy-db", 7, "secret-key", "res.partner", "write", [[4], {"name": "After"}], {}
+        )
+
+    @patch("odoo_direct.xmlrpc.client.ServerProxy")
+    def test_reports_server_major_version(self, server_proxy):
+        common = MagicMock()
+        common.version.return_value = {"server_version": "17.0+e"}
+        server_proxy.return_value = common
+        self.assertEqual(self.client.server_major_version(), 17)
 
 
 if __name__ == "__main__":

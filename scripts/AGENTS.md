@@ -36,8 +36,8 @@ odoo-direct upgrade write res.partner '[1]' "{'name': 'Example'}"
 The target's tags decide the policy for `read`, `create`, `write`, `unlink`, and
 `exec`. Valid values are `allow`, `ask`, and `deny`; the strictest value wins.
 The `production` tag cannot allow automatic writes. `ask` requires an unchanged
-preview followed by `--confirm`. JSON-2 requires Odoo 19 or newer and never falls
-back to another transport or target.
+preview followed by `--confirm`. Odoo 17 and 18 use XML-RPC. Odoo 19 and newer
+use JSON-2. The command never falls back to another transport or target.
 
 Target API keys use the derived name `ODOO_DIRECT_<TARGET>_API_KEY` in
 `.odoo/secrets.env`, replacing non-alphanumeric target-name characters with `_`.
