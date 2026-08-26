@@ -15,7 +15,7 @@
 # Environment (see .env):
 #   ODOO_ROOT    - Odoo source root
 #   PROJECT_ROOT - Project addons root
-#   PROJECT_NAME - Project db name
+#   DB_NAME      - Project database name
 #   PYTHON_PATH - Python venv bin directory
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -197,7 +197,7 @@ show_usage() {
     echo ""
     echo "Environment:"
     echo "  ODOO_ROOT=$ODOO_ROOT"
-    echo "  PROJECT_NAME=$PROJECT_NAME"
+    echo "  DB_NAME=$DB_NAME"
     echo "  PYTHON_PATH=$PYTHON_PATH"
     echo ""
     echo "With no arguments, shows this help message."

@@ -8,21 +8,23 @@
 #   odoo-fresh --dump <file.sql>         # Custom dump file
 #   odoo-fresh --update                  # Also sync Odoo source, update modules, refresh dump
 #
-# Environment (see .env in current directory):
-#   DB_NAME      - Default database name
-#   PROJECT_NAME - Project name (used for default dump file)
+# Configuration comes from <git-root>/.odoo/config.yaml.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 # Defaults
 DB_NAME_ARG="$DB_NAME"
-DUMP_FILE="$ENV_DIR/dump_${PROJECT_NAME}.sql"
+DUMP_FILE="$ODOO_CONFIG_DIR/dump.sql"
 UPDATE_MODE=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h|--help)
+            echo "Usage: odoo-fresh [--db DATABASE] [--dump FILE.sql] [--update]"
+            exit 0
+            ;;
         --db)
             DB_NAME_ARG="$2"
             shift 2

@@ -7,14 +7,13 @@
 #   ./configure_settings.sh --db <database> --modules <mod1,mod2>
 #   ./configure_settings.sh --db <database> --modules <mod1,mod2> --non-interactive
 #
-# Environment (see .env in current directory):
+# Configuration comes from <git-root>/.odoo/.
 #   ODOO_ROOT    - Odoo source root
 #   PYTHON_PATH  - Python venv bin directory
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
-DB_NAME="$PROJECT_NAME"
 MODULES=""
 NON_INTERACTIVE=false
 

@@ -10,14 +10,13 @@
 # Environment (see .env):
 #   ODOO_ROOT    - Odoo source root
 #   PROJECT_ROOT - Project addons root
-#   PROJECT_NAME - Default project db name
+#   DB_NAME      - Default database name
 #   PYTHON_PATH  - Python venv bin directory
 #   INIT_MODULES - Default modules to install (overridden by --modules)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
-DB_NAME="$PROJECT_NAME"
 MODULES="${INIT_MODULES:-base}"
 MODULES_FROM_CLI=false
 
@@ -146,8 +145,8 @@ print('Default product attributes cleanup complete.')
 "
 "$ODOO_BIN" shell -c "$CONF_FILE" -d "$DB_NAME" --no-http <<< "$DELETE_ATTRS_SCRIPT"
 
-# Create backup in $PWD
-DUMP_FILE="$PWD/dump_${DB_NAME}.sql"
+# Create backup in the worktree runtime directory.
+DUMP_FILE="$ODOO_CONFIG_DIR/dump.sql"
 echo "Creating backup: $DUMP_FILE"
 pg_dump -d "$DB_NAME" > "$DUMP_FILE"
 

@@ -144,6 +144,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Local Odoo access credentials
+/direct/config.json
+
 # Spyder project settings
 .spyderproject
 .spyproject
