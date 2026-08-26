@@ -11,11 +11,13 @@
 ## Target
 
 Each target declares `url`, `database`, `odoo_version`, and one or more tags.
+Odoo 17 and 18 targets also declare `username`.
 Its API-key variable is `ODOO_DIRECT_<NORMALIZED_TARGET>_API_KEY`. Normalization
 uppercases the name and replaces non-alphanumeric characters with `_`.
 
-JSON-2 requires Odoo 19 or newer. A lower version fails without transport or
-target fallback.
+`odoo_version` selects XML-RPC for versions 17 and 18. It selects JSON-2 for
+version 19 and newer. Versions before 17 fail without transport or target
+fallback.
 
 ## Policy
 
@@ -30,6 +32,9 @@ cannot resolve a write-capable operation to `allow`.
 
 ## Transport
 
-Calls use `POST /json/2/<model>/<method>`, bearer authorization, and an explicit
-`X-Odoo-Database` header. Redirects, configuration mismatches, and connection
-failures stop the command. The client never retries a write automatically.
+JSON-2 calls use `POST /json/2/<model>/<method>`, bearer authorization, and an
+explicit `X-Odoo-Database` header. XML-RPC calls authenticate with the target's
+database, username, and API key, then call `/xmlrpc/2/object`. `test` compares
+the configured major version with the server's major version. Configuration
+mismatches and connection failures stop the command. The client does not switch
+transports or retry a write automatically.

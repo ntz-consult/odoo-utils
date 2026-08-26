@@ -27,6 +27,7 @@ def config():
             "locked": {"read": "allow", "create": "deny", "write": "deny", "unlink": "deny", "exec": "deny"},
         },
         "targets": {
+            "production-17": {"odoo_version": 17, "url": "https://legacy.example.com", "database": "live17", "username": "agent@example.com", "tags": ["production"]},
             "production": {"odoo_version": 19, "url": "https://example.odoo.com", "database": "live", "tags": ["production"]},
             "upgrade-19": {"odoo_version": 19, "url": "http://127.0.0.1:8096", "database": "upgrade", "tags": ["develop"]},
         },
@@ -40,6 +41,35 @@ class DirectCliTests(unittest.TestCase):
         self.assertEqual(client.database, "upgrade")
         self.assertEqual(target["url"], "http://127.0.0.1:8096")
         self.assertEqual(label, "upgrade-19")
+
+    def test_odoo_17_selects_xml_rpc(self):
+        with patch.dict(os.environ, {"ODOO_DIRECT_PRODUCTION_17_API_KEY": "key"}, clear=True):
+            client, target, label = CLI.target_client(config(), "production-17")
+        self.assertEqual(client.transport, "xml-rpc")
+        self.assertEqual(client.username, "agent@example.com")
+        self.assertEqual(target["odoo_version"], 17)
+        self.assertEqual(label, "production-17")
+
+    def test_xml_rpc_requires_username(self):
+        value = config()
+        del value["targets"]["production-17"]["username"]
+        with patch.dict(os.environ, {"ODOO_DIRECT_PRODUCTION_17_API_KEY": "key"}, clear=True):
+            with self.assertRaisesRegex(CLI.TargetError, "username"):
+                CLI.target_client(value, "production-17")
+
+    def test_versions_before_17_are_rejected(self):
+        value = config()
+        value["targets"]["production-17"]["odoo_version"] = 16
+        with self.assertRaisesRegex(CLI.TargetError, "minimum is 17"):
+            CLI.target_client(value, "production-17")
+
+    def test_connection_test_rejects_version_mismatch(self):
+        client = MagicMock(odoo_version=17, transport="xml-rpc")
+        client.server_major_version.return_value = 18
+        args = CLI.build_parser().parse_args(["production-17", "test"])
+        with self.assertRaisesRegex(CLI.TargetError, "server reports Odoo 18"):
+            CLI.execute_command(client, args, "allow")
+        client.context_get.assert_not_called()
 
     def test_strictest_tag_wins(self):
         value = config()
