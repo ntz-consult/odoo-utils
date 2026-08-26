@@ -10,6 +10,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ODOO_RUNTIME_MODE=project
 source "$SCRIPT_DIR/common.sh"
 
 if [ $# -eq 0 ]; then
@@ -23,6 +24,10 @@ MODULE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h|--help)
+            echo "Usage: odoo-lint [--fix] [--ci] [--module MODULE]"
+            exit 0
+            ;;
         --fix) FIX=true; shift ;;
         --ci) CI=true; shift ;;
         --module)

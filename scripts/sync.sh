@@ -8,14 +8,14 @@
 # Options:
 #   --module MODULE     Module name to check (required)
 #   --detail            Show full discrepancy details (default is summary only)
-#   --update            Update XML for all discrepancies after confirmation
+#   --update [N]        Update XML after confirmation; with N, stop after N successful changes
 #   --model MODEL       Filter discrepancies to a single model
 #   --img               Include image/binary fields in comparison
 #   --debug             Print raw XML vs DB field comparisons
 #   --models            List models found in the module's XML data files and exit
 #   --out PATH          Also write the report to a Markdown file
 #
-# Environment (see .env in current directory):
+# Configuration comes from <git-root>/.odoo/.
 #   ODOO_ROOT    - Odoo source root
 #   PROJECT_ROOT - Project addons root
 #   DB_NAME      - Database name
@@ -23,6 +23,11 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    echo "Usage: odoo-sync --module MODULE [--detail] [--models] [--update [N]] [--out PATH]"
+    exit 0
+fi
 
 # Export variables for Python script
 export PROJECT_ROOT
