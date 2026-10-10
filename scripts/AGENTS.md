@@ -25,6 +25,21 @@ The command symlinks `secrets.env` from the primary checkout. It records the
 worktree database and ports in `.odoo/worktree.toml`; configuration never merges
 from a parent repository.
 
+When a worktree is finished, remove all of it: folder, database, filestore and
+branch. Nothing of a finished worktree may remain.
+
+```bash
+odoo-worktree-remove --dry-run ../repo-feature   # show the plan
+odoo-worktree-remove --yes ../repo-feature       # stop its Odoo, drop DB, remove, prune
+```
+
+It refuses the primary checkout, a database equal to the primary checkout's, and
+uncommitted changes or commits that are in no other branch or remote ref (unless
+`--force`, which discards that work). An optional hook (`--hook`,
+`$ODOO_WORKTREE_REMOVE_HOOK`, or the pool's `remove_hook` in the port register)
+runs afterwards, e.g. to regenerate a proxy configuration. Ports are never
+reserved, so the worktree's ports are free as soon as it is gone.
+
 ## Model access
 
 Use `odoo-direct targets` before choosing an unfamiliar target. Address every
