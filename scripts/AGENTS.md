@@ -91,11 +91,22 @@ to `odoo.conf` as `gevent_port`. When a register exists:
   another checkout is assigned, and any project without a pool;
 - `odoo-test` refuses test ports outside the project's test pool;
 - `odoo-init-env --worktree` allocates the first slot that no checkout claims and
-  nothing listens on.
+  nothing listens on, and writes `worktree.toml` under the port lock
+  (`~/.cache/odoo-utils/ports.lock`, override `ODOO_PORTS_LOCK`), so two worktrees
+  can never be given the same port.
+
+A linked worktree (`git worktree add`) has its own `worktree.toml` or it does not
+run. Its committed `config.toml` carries the primary checkout's ports, so
+`odoo-run`, `odoo-test` and `odoo-init-env` (without `--worktree`) refuse a linked
+worktree without `[ports] http` in its `worktree.toml`, and name the fix:
+`odoo-init-env --worktree --db NAME`. A linked worktree claims only its own
+`worktree.toml` ports. The primary checkout keeps its fixed ports.
 
 ```bash
 ports.py show                      # pools, clashes, configs outside their pool
-ports.py allocate PROJECT --root . # first free worktree slot
+ports.py allocate PROJECT --root . # first free worktree slot (preview only)
+ports.py assign PROJECT --root . --db NAME   # allocate and write worktree.toml, locked
+ports.py guard --root .            # may this linked worktree run? (exit 1 if not)
 ports.py check PROJECT --root . --http 8201
 ```
 
