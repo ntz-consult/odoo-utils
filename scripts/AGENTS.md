@@ -18,6 +18,9 @@ explicit allocation:
 odoo-init-env --worktree --db REPO_BRANCH --http-port 8201 --test-range-start 9700
 ```
 
+With a port register (below) `--http-port` and `--test-range-start` are optional:
+the command takes the first free slot of the project's pool.
+
 The command symlinks `secrets.env` from the primary checkout. It records the
 worktree database and ports in `.odoo/worktree.toml`; configuration never merges
 from a parent repository.
@@ -60,3 +63,26 @@ odoo-sync --module MODULE
 `odoo-run`, tests, installation, linting, sync, initialization, and refresh all
 use the same `.odoo/config.toml`. `odoo-fresh` reads `.odoo/dump.sql` unless the
 caller supplies `--dump`.
+
+## Port pools
+
+`scripts/ports.py` reads a port register (TOML; `$ODOO_PORTS_REGISTER`, default
+`~/Work/sys-admin/odoo/ports.toml`) that gives each project (`[project].name`)
+its own non-overlapping pool: a main http port, worktree http ports, and test-port
+blocks. The second (gevent/websocket) port is `http + gevent_offset` and is written
+to `odoo.conf` as `gevent_port`. When a register exists:
+
+- `odoo-run` refuses an http/gevent port outside the project's pool, a port that
+  another checkout is assigned, and any project without a pool;
+- `odoo-test` refuses test ports outside the project's test pool;
+- `odoo-init-env --worktree` allocates the first slot that no checkout claims and
+  nothing listens on.
+
+```bash
+ports.py show                      # pools, clashes, configs outside their pool
+ports.py allocate PROJECT --root . # first free worktree slot
+ports.py check PROJECT --root . --http 8201
+```
+
+Without a register nothing is enforced. Never start Odoo on a port outside your
+project's pool; add or change the pool in the register instead.

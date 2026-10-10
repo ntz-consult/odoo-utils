@@ -25,6 +25,7 @@ SHELL_MAPPING = {
     "DB_PORT": ("database", "port"),
     "DB_USER": ("database", "user"),
     "HTTP_PORT": ("ports", "http"),
+    "GEVENT_PORT": ("ports", "gevent"),
     "TEST_HTTP_PORT": ("ports", "test_http"),
     "TEST_GEVENT_PORT": ("ports", "test_gevent"),
     "TEST_PORT_RANGE_START": ("ports", "test_range_start"),
