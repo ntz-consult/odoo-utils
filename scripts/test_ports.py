@@ -436,6 +436,14 @@ class LinkedWorktreeTests(PortsBase):
         self.assertEqual(got, {"http": 8201, "gevent": 8701, "test_start": 10000, "test_end": 10101})
         self.assertEqual(ports.worktree_problems(wt), [])
 
+    def test_assign_writes_the_worktrees_own_data_dir(self):
+        # The committed config.toml names the primary's filestore; the worktree must not inherit it.
+        wt = self.linked("alpha-wt")
+        ports.assign(None, "alpha", wt, "alpha_wt", http=8201, test_start=10000,
+                     environ={"ODOO_PORTS_LOCK": str(self.lock), "ODOO_PORTS_WORK_ROOT": str(self.work)})
+        written = tomllib.loads((wt / ".odoo" / "worktree.toml").read_text())
+        self.assertEqual(written["odoo"]["data_dir"], str(wt / ".odoo" / "data"))
+
     def test_assign_pool_allocation_skips_other_worktrees(self):
         first = self.linked("alpha-wt1")
         second = self.linked("alpha-wt2")
