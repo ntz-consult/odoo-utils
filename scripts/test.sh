@@ -428,6 +428,12 @@ resolve_test_ports() {
         fi
     fi
 
+    # The pair must come from this project's test pool (scripts/ports.py).
+    if ! odoo_enforce_port_pool "$HTTP_PORT" "" "$http_port" "$gevent_port"; then
+        release_test_port_lock
+        exit 1
+    fi
+
     ODOO_TEST_ARGS=(
         --http-port "$http_port"
         --gevent-port "$gevent_port"

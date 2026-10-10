@@ -5,7 +5,7 @@ set -euo pipefail
 
 ODOO_MANAGED_CONF_KEYS=(
     addons_path bin_path data_dir db_host db_name db_password db_port db_user
-    http_interface http_port list_db log_level proxy_mode
+    gevent_port http_interface http_port list_db log_level proxy_mode
 )
 
 odoo_help_requested() {
@@ -85,13 +85,19 @@ odoo_load_env() {
     ODOO_PROXY_MODE="${ODOO_PROXY_MODE:-False}"
     ODOO_LOG_LEVEL="${ODOO_LOG_LEVEL:-info}"
     LOG_FILE="${LOG_FILE:-$ENV_DIR/${DB_NAME:-$(basename "$PROJECT_ROOT")}.log}"
+    # Port pools (scripts/ports.py): the project name selects the pool, and the
+    # second (gevent/websocket) port follows from the http port when a register exists.
+    ODOO_PORTS_PROJECT="${PROJECT_NAME:-$(basename "$PROJECT_ROOT")}"
+    if [[ -z "${GEVENT_PORT:-}" ]]; then
+        GEVENT_PORT="$(python3 "$(dirname "$loader")/ports.py" gevent "$ODOO_PORTS_PROJECT" --http "$HTTP_PORT" 2>/dev/null || true)"
+    fi
 
     export PROJECT_ROOT ODOO_CONFIG_DIR ODOO_CONFIG_FILE ODOO_SECRETS_FILE
     export ODOO_WORKTREE_FILE ENV_DIR ENV_FILE CONF_FILE CONF_LOCAL_FILE
     export PYTHON_PATH HTTP_PORT TEST_HTTP_PORT TEST_GEVENT_PORT
     export TEST_PORT_RANGE_START TEST_PORT_RANGE_END BIN_PATH ODOO_DATA_DIR
     export ODOO_HTTP_INTERFACE ODOO_LIST_DB ODOO_PROXY_MODE ODOO_LOG_LEVEL
-    export LOG_FILE
+    export LOG_FILE ODOO_PORTS_PROJECT GEVENT_PORT
     export PATH="$PYTHON_PATH:$PATH"
 }
 
@@ -147,6 +153,7 @@ odoo_render_conf() {
         printf '[options]\n'
         printf 'http_interface = %s\n' "$ODOO_HTTP_INTERFACE"
         printf 'http_port = %s\n' "$HTTP_PORT"
+        [[ -n "${GEVENT_PORT:-}" ]] && printf 'gevent_port = %s\n' "$GEVENT_PORT"
         [[ -n "${DB_HOST:-}" ]] && printf 'db_host = %s\n' "$DB_HOST"
         [[ -n "${DB_PORT:-}" ]] && printf 'db_port = %s\n' "$DB_PORT"
         [[ -n "${DB_USER:-}" ]] && printf 'db_user = %s\n' "$DB_USER"
@@ -181,6 +188,20 @@ odoo_require_local_runtime() {
         return 1
     fi
     odoo_render_conf
+}
+
+# Refuse ports outside this project's pool in the port register (scripts/ports.py).
+# Usage: odoo_enforce_port_pool HTTP [GEVENT] [TEST_START TEST_END]
+# Does nothing when no register is in use.
+odoo_enforce_port_pool() {
+    local http="$1" gevent="${2:-}" test_start="${3:-}" test_end="${4:-}" args
+    args=(check "$ODOO_PORTS_PROJECT" --root "$PROJECT_ROOT" --http "$http")
+    [[ -n "$gevent" ]] && args+=(--gevent "$gevent")
+    [[ -n "$test_start" && -n "$test_end" ]] && args+=(--test "$test_start" "$test_end")
+    if ! python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ports.py" "${args[@]}"; then
+        echo "Refusing to start Odoo for project '$ODOO_PORTS_PROJECT' in $PROJECT_ROOT." >&2
+        return 1
+    fi
 }
 
 odoo_bootstrap() {
