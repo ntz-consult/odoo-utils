@@ -187,6 +187,12 @@ odoo_require_local_runtime() {
         echo "Check odoo.root in $ODOO_CONFIG_FILE." >&2
         return 1
     fi
+    # A linked worktree (git worktree add) must have its own ports in .odoo/worktree.toml.
+    # Without them it would fall back to the primary checkout's ports from config.toml.
+    if ! python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ports.py" guard --root "$PROJECT_ROOT"; then
+        echo "Refusing to start Odoo in linked worktree $PROJECT_ROOT." >&2
+        return 1
+    fi
     odoo_render_conf
 }
 
