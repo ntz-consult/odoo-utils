@@ -24,9 +24,9 @@ The Odoo Project Sync utility is a standalone Python application that automates 
 
 ### Development Environment
 
-- **Primary Development Location**: `/home/gdt/awork/odoo-project-sync`
-- **Test Environment**: `/home/gdt/awork/ropeworx`
-- **Test Environment Utility Instance**: `/home/gdt/awork/ropeworx/.odoo-sync`
+- **Primary Development Location**: `~/awork/odoo-project-sync`
+- **Test Environment**: `~/awork/ropeworx`
+- **Test Environment Utility Instance**: `~/awork/ropeworx/.odoo-sync`
 
 ---
 
@@ -83,7 +83,7 @@ The Odoo Project Sync utility is a standalone Python application that automates 
 
 ### 4. Implementation
 
-Implement changes only in the primary development location (`/home/gdt/awork/odoo-project-sync`):
+Implement changes only in the primary development location (`~/awork/odoo-project-sync`):
 - Follow existing code patterns and conventions
 - Ensure changes are targeted and well-structured
 - **DO NOT go off on tangents with elaborate unnecessary additions**
@@ -95,30 +95,30 @@ Implement changes only in the primary development location (`/home/gdt/awork/odo
 ### 5. Test Environment Validation
 
 **REQUIRED**: Utilize the test environment for verification:
-- Access the test environment at `/home/gdt/awork/ropeworx` for real-world data testing
+- Access the test environment at `~/awork/ropeworx` for real-world data testing
 - Verify behavior with already configured configs
-- **NEVER make code changes** in `/home/gdt/awork/ropeworx/.odoo-sync`
+- **NEVER make code changes** in `~/awork/ropeworx/.odoo-sync`
 - Use the test environment for read-only verification and validation only
 
 #### Test Environment Data Files
 
 | File | Location | Purpose |
 |------|----------|---------|
-| Feature map TOML | `/home/gdt/awork/ropeworx/studio/feature_user_story_map.toml` | Actual task_ids and feature definitions |
-| Odoo config | `/home/gdt/awork/ropeworx/.odoo-sync/odoo-instances.json` | Project ID, Odoo credentials |
-| Environment vars | `/home/gdt/awork/ropeworx/.odoo-sync/.env` | API keys |
+| Feature map TOML | `~/awork/ropeworx/studio/feature_user_story_map.toml` | Actual task_ids and feature definitions |
+| Odoo config | `~/awork/ropeworx/.odoo-sync/odoo-instances.json` | Project ID, Odoo credentials |
+| Environment vars | `~/awork/ropeworx/.odoo-sync/.env` | API keys |
 
 #### How to Query Odoo from Test Environment
 
 ```bash
 # Navigate to test environment and load credentials
-cd /home/gdt/awork/ropeworx/.odoo-sync
+cd ~/awork/ropeworx/.odoo-sync
 export $(grep -v '^#' .env | xargs)
 
 # Example: Query a specific task from Odoo
 python3 << 'EOF'
 import json, sys, os
-sys.path.insert(0, '/home/gdt/awork/odoo-project-sync/shared/python')
+sys.path.insert(0, '~/awork/odoo-project-sync/shared/python')
 from odoo_client import OdooClient
 
 client = OdooClient("https://www.ntz.co.za", "ntzc", "odoo@ntz.co.za", os.getenv("ODOO_NTZ_API_KEY"))
@@ -148,7 +148,7 @@ EOF
 ### Hard Rules
 
 1. **No Assumptions**: Never proceed based on assumptions - always verify by reading the source code
-2. **No Test Environment Modifications**: The test environment (`/home/gdt/awork/ropeworx/.odoo-sync`) is read-only for validation purposes
+2. **No Test Environment Modifications**: The test environment (`~/awork/ropeworx/.odoo-sync`) is read-only for validation purposes
 3. **Clarification Required**: If requirements are unclear, clarification is mandatory before proceeding
 4. **User Confirmation**: Get explicit confirmation before starting implementation
 5. **No Code Duplication**: Extract shared logic into utilities

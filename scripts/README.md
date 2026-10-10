@@ -15,9 +15,9 @@ odoo-direct local test
 The shared layout is:
 
 ```text
-.odoo/config.yaml    committed project and target configuration
+.odoo/config.toml    committed project and target configuration
 .odoo/secrets.env    ignored credentials
-.odoo/worktree.yaml  ignored explicit worktree database and ports
+.odoo/worktree.toml  ignored explicit worktree database and ports
 .odoo/dump.sql       ignored odoo-fresh source
 .odoo/odoo.conf      ignored generated server configuration
 ```

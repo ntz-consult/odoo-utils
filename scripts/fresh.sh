@@ -8,7 +8,7 @@
 #   odoo-fresh --dump <file.sql>         # Custom dump file
 #   odoo-fresh --update                  # Also sync Odoo source, update modules, refresh dump
 #
-# Configuration comes from <git-root>/.odoo/config.yaml.
+# Configuration comes from <git-root>/.odoo/config.toml.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
@@ -64,11 +64,11 @@ if [[ "$UPDATE_MODE" == false ]]; then
 fi
 
 echo "Dropping database: $DB_NAME_ARG"
-psql -c "drop database $DB_NAME_ARG;" 2>/dev/null || true
+psql -d postgres -c "drop database $DB_NAME_ARG;" 2>/dev/null || true
 sleep 2s
 
 echo "Creating database: $DB_NAME_ARG"
-psql -c "create database $DB_NAME_ARG OWNER odoo;"
+psql -d postgres -c "create database $DB_NAME_ARG OWNER odoo;"
 sleep 2s
 
 echo "Restoring from dump..."

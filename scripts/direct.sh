@@ -5,7 +5,7 @@
 #   odoo-direct local test
 #   odoo-direct production search-read res.company "[]" "['name']"
 #
-# Targets come from <Git repository root>/.odoo/config.yaml.
+# Targets come from <Git repository root>/.odoo/config.toml.
 
 set -euo pipefail
 

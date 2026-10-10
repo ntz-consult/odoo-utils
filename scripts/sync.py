@@ -43,7 +43,7 @@ from enum import Enum
 # Read from environment (set by sync.sh which sources common.sh)
 ENV_DIR = Path(os.environ.get("ENV_DIR", Path.cwd()))
 PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", ENV_DIR))
-ODOO_ROOT = Path(os.environ.get("ODOO_ROOT", "/home/gdt/Odoo/V19"))
+ODOO_ROOT = Path(os.environ.get("ODOO_ROOT", str(Path.home() / "Odoo/V19")))
 ODOO_SOURCE = ODOO_ROOT / "odoo"
 CONFIG_FILE = Path(os.environ.get("CONF_FILE", ENV_DIR / "odoo.conf"))
 

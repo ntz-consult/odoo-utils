@@ -3,11 +3,35 @@
 
 import io
 import json
+import socket
 import unittest
 from unittest.mock import MagicMock, patch
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
-from odoo_direct import OdooAuthError, OdooDirect, OdooError, OdooXmlRpc, _NoRedirect
+from odoo_direct import (
+    OdooAuthError,
+    OdooDirect,
+    OdooError,
+    OdooXmlRpc,
+    _NoRedirect,
+    connect_error,
+    parse_major_version,
+)
+
+
+class ParseMajorVersionTests(unittest.TestCase):
+    def test_saas_and_series_strings(self):
+        self.assertEqual(parse_major_version("saas~19.3.1.3"), 19)
+        self.assertEqual(parse_major_version("19.3.1.3"), 19)
+        self.assertEqual(parse_major_version("17.0+e"), 17)
+        self.assertEqual(parse_major_version(19), 19)
+        self.assertEqual(parse_major_version(19.3), 19)
+
+    def test_rejects_values_without_a_number(self):
+        with self.assertRaises(ValueError):
+            parse_major_version("saas~")
+        with self.assertRaises(ValueError):
+            parse_major_version(True)
 
 
 class FakeResponse:
@@ -103,6 +127,30 @@ class Json2ClientTests(unittest.TestCase):
         with self.assertRaisesRegex(OdooError, "upstream unavailable"):
             self.client.search("res.partner", [])
 
+    @patch("odoo_direct.urlopen")
+    def test_reports_saas_major_version(self, mocked_open):
+        mocked_open.return_value = FakeResponse(
+            [{"id": 1, "installed_version": "saas~19.3.1.3"}]
+        )
+        self.assertEqual(self.client.server_major_version(), 19)
+
+    @patch("odoo_direct.urlopen")
+    def test_name_resolution_failure_asks_for_host_network(self, mocked_open):
+        mocked_open.side_effect = URLError(socket.gaierror(-3, "Temporary failure in name resolution"))
+        with self.assertRaisesRegex(OdooError, "host network required to reach https://example.odoo.com"):
+            self.client.search("res.partner", [])
+
+
+class ConnectErrorTests(unittest.TestCase):
+    def test_dns_isolation_is_classified(self):
+        error = connect_error("https://roses.odoo.com", socket.gaierror(-2, "Name or service not known"))
+        self.assertIn("host network required", str(error))
+        self.assertNotIn("Cannot connect", str(error))
+
+    def test_ordinary_refused_connection_stays_a_connect_error(self):
+        error = connect_error("https://roses.odoo.com", ConnectionRefusedError(111, "Connection refused"))
+        self.assertIn("Cannot connect", str(error))
+
 
 class XmlRpcClientTests(unittest.TestCase):
     def setUp(self):
@@ -150,6 +198,13 @@ class XmlRpcClientTests(unittest.TestCase):
         common.version.return_value = {"server_version": "17.0+e"}
         server_proxy.return_value = common
         self.assertEqual(self.client.server_major_version(), 17)
+
+    @patch("odoo_direct.xmlrpc.client.ServerProxy")
+    def test_reports_saas_major_version(self, server_proxy):
+        common = MagicMock()
+        common.version.return_value = {"server_version": "saas~19.3+e"}
+        server_proxy.return_value = common
+        self.assertEqual(self.client.server_major_version(), 19)
 
 
 if __name__ == "__main__":

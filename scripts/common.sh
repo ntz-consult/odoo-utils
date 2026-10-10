@@ -23,9 +23,9 @@ odoo_resolve_project() {
         return 1
     fi
     ODOO_CONFIG_DIR="$PROJECT_ROOT/.odoo"
-    ODOO_CONFIG_FILE="$ODOO_CONFIG_DIR/config.yaml"
+    ODOO_CONFIG_FILE="$ODOO_CONFIG_DIR/config.toml"
     ODOO_SECRETS_FILE="$ODOO_CONFIG_DIR/secrets.env"
-    ODOO_WORKTREE_FILE="$ODOO_CONFIG_DIR/worktree.yaml"
+    ODOO_WORKTREE_FILE="$ODOO_CONFIG_DIR/worktree.toml"
     ENV_DIR="$ODOO_CONFIG_DIR"
     ENV_FILE="$ODOO_SECRETS_FILE"
     CONF_FILE="$ODOO_CONFIG_DIR/odoo.conf"
@@ -37,8 +37,12 @@ odoo_resolve_project() {
 odoo_load_env() {
     local required="${1:-true}"
     local resolved_root="$PROJECT_ROOT" loader
-    loader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config.rb"
+    loader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config.py"
     if [[ ! -f "$ODOO_CONFIG_FILE" ]]; then
+        if [[ -f "$ODOO_CONFIG_DIR/config.yaml" ]]; then
+            echo "Error: found $ODOO_CONFIG_DIR/config.yaml; rename it to config.toml. Odoo commands now read TOML, not YAML." >&2
+            return 1
+        fi
         if [[ "$required" == true ]]; then
             echo "Error: project runtime configuration not found: $ODOO_CONFIG_FILE" >&2
             echo "Run 'odoo-init-env' anywhere in this worktree." >&2
@@ -47,9 +51,9 @@ odoo_load_env() {
         return 0
     fi
 
-    # The YAML is portable and committed. The optional worktree file contains
+    # The TOML is portable and committed. The optional worktree file contains
     # explicit local database and port overrides. Credentials stay ignored.
-    eval "$(ruby "$loader" shell "$ODOO_CONFIG_FILE" "$ODOO_WORKTREE_FILE")"
+    eval "$(python3 "$loader" shell "$ODOO_CONFIG_FILE" "$ODOO_WORKTREE_FILE")"
     if [[ -f "$ODOO_SECRETS_FILE" ]]; then
         set -a
         # shellcheck disable=SC1090
@@ -60,9 +64,9 @@ odoo_load_env() {
     # Repository identity is derived and cannot be overridden by .env.
     PROJECT_ROOT="$resolved_root"
     ODOO_CONFIG_DIR="$PROJECT_ROOT/.odoo"
-    ODOO_CONFIG_FILE="$ODOO_CONFIG_DIR/config.yaml"
+    ODOO_CONFIG_FILE="$ODOO_CONFIG_DIR/config.toml"
     ODOO_SECRETS_FILE="$ODOO_CONFIG_DIR/secrets.env"
-    ODOO_WORKTREE_FILE="$ODOO_CONFIG_DIR/worktree.yaml"
+    ODOO_WORKTREE_FILE="$ODOO_CONFIG_DIR/worktree.toml"
     ENV_DIR="$ODOO_CONFIG_DIR"
     ENV_FILE="$ODOO_SECRETS_FILE"
     CONF_FILE="$ODOO_CONFIG_DIR/odoo.conf"
@@ -196,9 +200,9 @@ odoo_bootstrap() {
 if odoo_help_requested "$@"; then
     PROJECT_ROOT="${PROJECT_ROOT:-$PWD}"
     ODOO_CONFIG_DIR="${ODOO_CONFIG_DIR:-$PROJECT_ROOT/.odoo}"
-    ODOO_CONFIG_FILE="${ODOO_CONFIG_FILE:-$ODOO_CONFIG_DIR/config.yaml}"
+    ODOO_CONFIG_FILE="${ODOO_CONFIG_FILE:-$ODOO_CONFIG_DIR/config.toml}"
     ODOO_SECRETS_FILE="${ODOO_SECRETS_FILE:-$ODOO_CONFIG_DIR/secrets.env}"
-    ODOO_WORKTREE_FILE="${ODOO_WORKTREE_FILE:-$ODOO_CONFIG_DIR/worktree.yaml}"
+    ODOO_WORKTREE_FILE="${ODOO_WORKTREE_FILE:-$ODOO_CONFIG_DIR/worktree.toml}"
     ENV_DIR="${ENV_DIR:-$ODOO_CONFIG_DIR}"
     ENV_FILE="${ENV_FILE:-$ODOO_SECRETS_FILE}"
     CONF_FILE="${CONF_FILE:-$ODOO_CONFIG_DIR/odoo.conf}"
