@@ -36,7 +36,11 @@ odoo-direct upgrade write res.partner '[1]' "{'name': 'Example'}"
 The target's tags in `.odoo/config.toml` decide the policy for `read`, `create`,
 `write`, `unlink`, and `exec`. Valid values are `allow`, `ask`, and `deny`; the
 strictest value wins. Target and tag names add no extra restrictions. `ask`
-requires an unchanged preview followed by `--confirm`. Odoo 17 and 18 use
+requires an unchanged preview followed by `--confirm`. A tag may narrow its
+policy per model with `[tags.<tag>.models."<model>"]` (optional `fields` and
+`methods` tables); the most specific rule wins inside a tag, and the
+strictest tag still wins across tags. See `direct/odoo-direct-spec.md`.
+Executed changes are appended to `.odoo/odoo-direct-audit.log`. Odoo 17 and 18 use
 XML-RPC. Odoo 19 and newer use JSON-2. The command never falls back to another
 transport or target.
 
