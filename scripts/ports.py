@@ -14,6 +14,7 @@ A register (TOML) gives every project its own non-overlapping blocks of ports:
     worktrees = [8300, 8349]            # http ports for linked worktrees
     worktree_tests = [24000, 25999]     # test ports for linked worktrees
     test_block = 40                     # test ports per worktree
+    remove_hook = "cmd"                 # optional: run by odoo-worktree-remove
 
 Worktree slot n uses http = worktrees[0] + n, gevent = http + gevent_offset and
 tests worktree_tests[0] + n * test_block .. + test_block - 1.
@@ -29,6 +30,10 @@ Commands:
     ports.py slot PROJECT --http P        canonical worktree slot of an http port
     ports.py gevent PROJECT --http P      gevent port for an http port
     ports.py active                       register path; exit 3 when none is in use
+    ports.py hook PROJECT                 the pool's remove_hook (odoo-worktree-remove)
+
+Ports are never reserved: a worktree's ports are free as soon as its folder (with
+its .odoo configuration) is gone and nothing listens on them.
 """
 
 from __future__ import annotations
@@ -60,6 +65,7 @@ class Pool:
     worktrees: tuple[int, int] | None = None
     worktree_tests: tuple[int, int] | None = None
     test_block: int = 100
+    remove_hook: str = ""
 
     def http_ports(self) -> set[int]:
         ports = set()
@@ -160,6 +166,7 @@ def load_register(path: Path | None = None, *, required: bool = False, environ=N
             worktrees=_span(raw.get("worktrees"), name, "worktrees"),
             worktree_tests=_span(raw.get("worktree_tests"), name, "worktree_tests"),
             test_block=block,
+            remove_hook=str(raw.get("remove_hook") or ""),
         )
     work_root = environ.get("ODOO_PORTS_WORK_ROOT") or data.get("work_root") or "~/Work"
     register = Register(
@@ -458,6 +465,13 @@ def _cmd_active(register: Register, _args) -> int:
     return 0
 
 
+def _cmd_hook(register: Register, args) -> int:
+    hook = register.pools.get(args.project, Pool(args.project)).remove_hook
+    if hook:
+        print(hook)
+    return 0
+
+
 def _cmd_gevent(register: Register, args) -> int:
     register.pool(args.project)
     print(args.http + register.gevent_offset)
@@ -482,6 +496,8 @@ def main(argv=None) -> int:
     p.add_argument("project")
     p.add_argument("--http", type=int, required=True)
     sub.add_parser("active")
+    p = sub.add_parser("hook")
+    p.add_argument("project")
     p = sub.add_parser("gevent")
     p.add_argument("project")
     p.add_argument("--http", type=int, required=True)
@@ -493,14 +509,14 @@ def main(argv=None) -> int:
             register = load_register()
         if register is None:
             # No register: nothing to enforce. allocate/show still need one.
-            if args.command in {"check", "gevent"}:
+            if args.command in {"check", "gevent", "hook"}:
                 return 0
             if args.command == "active":
                 return 3
             raise PortError("no port register (set ODOO_PORTS_REGISTER or create %s)" % DEFAULT_REGISTER)
         return {"show": _cmd_show, "allocate": _cmd_allocate,
                 "check": _cmd_check, "gevent": _cmd_gevent,
-                "slot": _cmd_slot, "active": _cmd_active}[args.command](register, args)
+                "slot": _cmd_slot, "active": _cmd_active, "hook": _cmd_hook}[args.command](register, args)
     except PortError as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
