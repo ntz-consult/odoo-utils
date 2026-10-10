@@ -172,4 +172,4 @@ A new markdown document `reports_map.md` is generated in the `studio/` folder du
 - **`_generate_reports_map()`** - Main method that generates the markdown file
 - **`_build_template_tree()`** - Recursively builds the template dependency tree
 - **`_format_template_tree()`** - Formats the tree as indented markdown lines</content>
-<parameter name="filePath">/home/gdt/awork/odoo-project-sync/specs/refactor_module_creation.md
+<parameter name="filePath">~/awork/odoo-project-sync/specs/refactor_module_creation.md

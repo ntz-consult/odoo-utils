@@ -16,6 +16,21 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.]*$")
+MAJOR_VERSION_RE = re.compile(r"\d+")
+
+
+def parse_major_version(value: Any) -> int:
+    """Return the major series from an Odoo version number or SaaS string."""
+    if isinstance(value, bool) or value is None:
+        raise ValueError(f"Invalid Odoo version: {value!r}")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    match = MAJOR_VERSION_RE.search(str(value).strip())
+    if not match:
+        raise ValueError(f"Invalid Odoo version: {value!r}")
+    return int(match.group(0))
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -25,10 +40,34 @@ class _NoRedirect(HTTPRedirectHandler):
 
 _OPENER = build_opener(_NoRedirect)
 
+_DNS_MARKERS = (
+    "name or service not known",
+    "temporary failure in name resolution",
+    "nodename nor servname provided",
+    "name resolution",
+)
+
 
 def urlopen(request, timeout):
     """Open one endpoint without following redirects to another target."""
     return _OPENER.open(request, timeout=timeout)
+
+
+def connect_error(url, exc):
+    """Map a transport failure onto a target-specific OdooError."""
+    reason = getattr(exc, "reason", exc)
+    errno = getattr(reason, "errno", None)
+    if errno is None:
+        errno = getattr(exc, "errno", None)
+    text = f"{reason} {exc}".lower()
+    isolated = errno in (-2, -3, getattr(socket, "EAI_NONAME", -2), getattr(socket, "EAI_AGAIN", -3))
+    isolated = isolated or any(marker in text for marker in _DNS_MARKERS)
+    if isolated:
+        return OdooError(
+            f"host network required to reach {url}. "
+            "Rerun the identical odoo-direct command with host/network execution."
+        )
+    return OdooError(f"Cannot connect to {url}: {reason}")
 
 
 class OdooError(Exception):
@@ -76,7 +115,10 @@ class OdooDirect:
         self.api_key = str(cfg["api_key"])
         self.timeout = timeout
         self.transport = "json-2"
-        self.odoo_version = int(cfg.get("odoo_version", 19))
+        try:
+            self.odoo_version = parse_major_version(cfg.get("odoo_version", 19))
+        except ValueError as exc:
+            raise OdooConfigError(str(exc)) from exc
 
     @staticmethod
     def _validate_name(value: str, label: str) -> str:
@@ -135,7 +177,7 @@ class OdooDirect:
         except socket.timeout as exc:
             raise OdooError(f"Request timed out after {self.timeout}s") from exc
         except URLError as exc:
-            raise OdooError(f"Cannot connect to {self.url}: {exc.reason}") from exc
+            raise connect_error(self.url, exc) from exc
         try:
             return json.loads(body)
         except json.JSONDecodeError as exc:
@@ -152,7 +194,7 @@ class OdooDirect:
             raise OdooError("Could not determine the Odoo server version")
         version = str(records[0]["installed_version"])
         try:
-            return int(version.split(".", 1)[0])
+            return parse_major_version(version)
         except ValueError as exc:
             raise OdooError(f"Invalid Odoo server version: {version!r}") from exc
 
@@ -213,7 +255,10 @@ class OdooXmlRpc:
         self.api_key = str(config["api_key"])
         self.timeout = timeout
         self.transport = "xml-rpc"
-        self.odoo_version = int(config["odoo_version"])
+        try:
+            self.odoo_version = parse_major_version(config["odoo_version"])
+        except (KeyError, ValueError) as exc:
+            raise OdooConfigError(f"Invalid Odoo version: {config.get('odoo_version')!r}") from exc
         self._uid = None
 
     def _proxy(self, service):
@@ -234,7 +279,9 @@ class OdooXmlRpc:
             uid = self._proxy("common").authenticate(
                 self.database, self.username, self.api_key, {}
             )
-        except (OSError, xmlrpc.client.Error) as exc:
+        except OSError as exc:
+            raise connect_error(self.url, exc) from exc
+        except xmlrpc.client.Error as exc:
             raise self._translate_error(exc) from exc
         if not uid:
             raise OdooAuthError(
@@ -247,8 +294,10 @@ class OdooXmlRpc:
         try:
             result = self._proxy("common").version()
             version = str(result["server_version"])
-            return int(version.split(".", 1)[0])
-        except (KeyError, TypeError, ValueError, OSError, xmlrpc.client.Error) as exc:
+            return parse_major_version(version)
+        except OSError as exc:
+            raise connect_error(self.url, exc) from exc
+        except (KeyError, TypeError, ValueError, xmlrpc.client.Error) as exc:
             if isinstance(exc, xmlrpc.client.Fault):
                 raise self._translate_error(exc) from exc
             raise OdooError(f"Could not determine the Odoo server version: {exc}") from exc
@@ -272,7 +321,9 @@ class OdooXmlRpc:
                 arguments,
                 options,
             )
-        except (OSError, xmlrpc.client.Error) as exc:
+        except OSError as exc:
+            raise connect_error(self.url, exc) from exc
+        except xmlrpc.client.Error as exc:
             raise self._translate_error(exc) from exc
 
     def context_get(self):

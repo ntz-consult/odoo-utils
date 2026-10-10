@@ -1,5 +1,5 @@
 #!/bin/bash
-# Store the API key for a target already declared in .odoo/config.yaml.
+# Store the API key for a target already declared in .odoo/config.toml.
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,7 +12,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || $# -ne 1 ]]; then
 fi
 
 TARGET="$1"
-CONFIG_JSON="$(ruby "$SCRIPT_DIR/config.rb" json "$ODOO_CONFIG_FILE" "$ODOO_WORKTREE_FILE")"
+CONFIG_JSON="$(python3 "$SCRIPT_DIR/config.py" json "$ODOO_CONFIG_FILE" "$ODOO_WORKTREE_FILE")"
 if ! python3 -c 'import json,sys; data=json.load(sys.stdin); raise SystemExit(0 if sys.argv[1] in data.get("targets", {}) else 1)' "$TARGET" <<<"$CONFIG_JSON"; then
     echo "Error: target '$TARGET' is not declared in $ODOO_CONFIG_FILE." >&2
     exit 1

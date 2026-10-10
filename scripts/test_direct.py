@@ -57,6 +57,23 @@ class DirectCliTests(unittest.TestCase):
             with self.assertRaisesRegex(CLI.TargetError, "username"):
                 CLI.target_client(value, "production-17")
 
+    def test_saas_version_string_selects_json2(self):
+        value = config()
+        value["targets"]["production"]["odoo_version"] = "saas~19.3.1.3"
+        with patch.dict(os.environ, {"ODOO_DIRECT_PRODUCTION_API_KEY": "key"}, clear=True):
+            client, target, label = CLI.target_client(value, "production")
+        self.assertEqual(client.transport, "json-2")
+        self.assertEqual(client.odoo_version, 19)
+        self.assertEqual(target["odoo_version"], 19)
+        self.assertEqual(label, "production")
+
+    def test_dotted_version_selects_json2(self):
+        value = config()
+        value["targets"]["production"]["odoo_version"] = "19.3.1.3"
+        with patch.dict(os.environ, {"ODOO_DIRECT_PRODUCTION_API_KEY": "key"}, clear=True):
+            client, _target, _label = CLI.target_client(value, "production")
+        self.assertEqual(client.odoo_version, 19)
+
     def test_versions_before_17_are_rejected(self):
         value = config()
         value["targets"]["production-17"]["odoo_version"] = 16
@@ -71,6 +88,16 @@ class DirectCliTests(unittest.TestCase):
             CLI.execute_command(client, args, "allow")
         client.context_get.assert_not_called()
 
+    def test_connection_test_accepts_matching_saas_major(self):
+        client = MagicMock(odoo_version=19, transport="json-2")
+        client.server_major_version.return_value = 19
+        client.context_get.return_value = {"uid": 2}
+        client.search_count.return_value = 4
+        args = CLI.build_parser().parse_args(["production", "test"])
+        result = CLI.execute_command(client, args, "allow")
+        self.assertEqual(result["status"], "connected")
+        self.assertEqual(result["odoo version"], 19)
+
     def test_strictest_tag_wins(self):
         value = config()
         value["targets"]["upgrade-19"]["tags"] = ["develop", "locked"]
@@ -82,11 +109,10 @@ class DirectCliTests(unittest.TestCase):
         with self.assertRaisesRegex(CLI.TargetError, "missing policies: exec"):
             CLI.resolve_policy(value, "upgrade-19", "write")
 
-    def test_production_cannot_allow_write(self):
+    def test_config_allows_production_write(self):
         value = config()
         value["tags"]["production"]["write"] = "allow"
-        with self.assertRaisesRegex(CLI.TargetError, "production"):
-            CLI.resolve_policy(value, "production", "write")
+        self.assertEqual(CLI.resolve_policy(value, "production", "write"), "allow")
 
     def test_ask_previews_without_write(self):
         client = MagicMock()

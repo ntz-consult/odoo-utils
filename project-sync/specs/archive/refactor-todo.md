@@ -174,16 +174,16 @@ Standalone Processes:
 
 ### Files Modified
 
-1. `/home/gdt/awork/odoo-project-sync/shared/python/user_story_enricher.py`
-2. `/home/gdt/awork/odoo-project-sync/shared/python/cli.py`
-3. `/home/gdt/awork/odoo-project-sync/shared/python/change_applier.py`
-4. `/home/gdt/awork/odoo-project-sync/shared/python/change_detector.py`
-5. `/home/gdt/awork/odoo-project-sync/shared/python/conflict_resolver.py`
-6. `/home/gdt/awork/odoo-project-sync/shared/python/sync_types.py`
-7. `/home/gdt/awork/odoo-project-sync/shared/python/todo_parser.py`
-8. `/home/gdt/awork/odoo-project-sync/tests/test_todo_parser.py`
-9. `/home/gdt/awork/odoo-project-sync/README.md`
-10. `/home/gdt/awork/odoo-project-sync/Odoo_Sync_HowTo.md`
+1. `~/awork/odoo-project-sync/shared/python/user_story_enricher.py`
+2. `~/awork/odoo-project-sync/shared/python/cli.py`
+3. `~/awork/odoo-project-sync/shared/python/change_applier.py`
+4. `~/awork/odoo-project-sync/shared/python/change_detector.py`
+5. `~/awork/odoo-project-sync/shared/python/conflict_resolver.py`
+6. `~/awork/odoo-project-sync/shared/python/sync_types.py`
+7. `~/awork/odoo-project-sync/shared/python/todo_parser.py`
+8. `~/awork/odoo-project-sync/tests/test_todo_parser.py`
+9. `~/awork/odoo-project-sync/README.md`
+10. `~/awork/odoo-project-sync/Odoo_Sync_HowTo.md`
 
 ### Validation Results
 

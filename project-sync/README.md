@@ -141,4 +141,4 @@ pytest
 ## License
 
 [Specify license if applicable]</content>
-<parameter name="filePath">/home/gdt/aa-work/odoo-project-sync/README.md
+<parameter name="filePath">~/aa-work/odoo-project-sync/README.md

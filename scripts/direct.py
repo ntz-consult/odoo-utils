@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import importlib.util
 import json
 import os
 import re
@@ -13,7 +14,14 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from odoo_direct import OdooAuthError, OdooConfigError, OdooDirect, OdooError, OdooXmlRpc
+from odoo_direct import (
+    OdooAuthError,
+    OdooConfigError,
+    OdooDirect,
+    OdooError,
+    OdooXmlRpc,
+    parse_major_version,
+)
 
 
 MAX_ROWS = 50
@@ -32,6 +40,12 @@ class TargetError(RuntimeError):
 
 
 def parse_literal(raw: str, label: str, expected_type):
+    if raw.startswith("@"):
+        payload_path = Path(raw[1:])
+        try:
+            raw = payload_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise TargetError(f"Unable to read {label} payload file.") from exc
     try:
         value = ast.literal_eval(raw)
     except (SyntaxError, ValueError) as exc:
@@ -54,19 +68,25 @@ def resolve_git_root() -> Path:
     return Path(output.strip()).resolve()
 
 
+def _config_loader():
+    spec = importlib.util.spec_from_file_location(
+        "odoo_runtime_config", Path(__file__).with_name("config.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
 def load_project_config() -> dict:
     root = resolve_git_root()
-    config_path = Path(os.environ.get("ODOO_DIRECT_CONFIG_FILE", root / ".odoo/config.yaml"))
-    worktree_path = Path(os.environ.get("ODOO_DIRECT_WORKTREE_FILE", root / ".odoo/worktree.yaml"))
-    loader = Path(__file__).with_name("config.rb")
-    command = ["ruby", str(loader), "json", str(config_path), str(worktree_path)]
+    config_path = Path(os.environ.get("ODOO_DIRECT_CONFIG_FILE", root / ".odoo/config.toml"))
+    worktree_path = Path(os.environ.get("ODOO_DIRECT_WORKTREE_FILE", root / ".odoo/worktree.toml"))
+    loader = _config_loader()
     try:
-        result = subprocess.run(command, check=True, text=True, capture_output=True)
-        config = json.loads(result.stdout)
-    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
-        detail = getattr(exc, "stderr", "") or str(exc)
-        raise TargetError(detail.strip()) from exc
-    return config
+        return loader.load_merged_config(config_path, worktree_path)
+    except loader.ConfigError as exc:
+        raise TargetError(str(exc)) from exc
 
 
 def secret_variable(target_name: str) -> str:
@@ -91,10 +111,7 @@ def resolve_policy(config: dict, target_name: str, operation: str) -> str:
         if invalid:
             raise TargetError(f"Tag {tag_name!r} has invalid policies: {invalid}")
         values.append(tag[operation])
-    policy = max(values, key=POLICY_VALUES.__getitem__)
-    if "production" in tag_names and operation != "read" and policy == "allow":
-        raise TargetError("The reserved production tag cannot allow automatic writes.")
-    return policy
+    return max(values, key=POLICY_VALUES.__getitem__)
 
 
 def target_client(config: dict, target_name: str):
@@ -107,9 +124,13 @@ def target_client(config: dict, target_name: str):
     target = targets[target_name]
     if not isinstance(target, dict):
         raise TargetError(f"Target {target_name!r} must be a mapping.")
-    version = target.get("odoo_version")
-    if not isinstance(version, int):
-        raise TargetError(f"Target {target_name!r} must declare integer odoo_version.")
+    try:
+        version = parse_major_version(target.get("odoo_version"))
+    except ValueError as exc:
+        raise TargetError(
+            f"Target {target_name!r} must declare odoo_version as a major number "
+            "or version string (for example 19 or saas~19.3.1.3)."
+        ) from exc
     if version < 17:
         raise TargetError(f"Target {target_name!r} runs unsupported Odoo {version}; minimum is 17.")
     variable = secret_variable(target_name)
@@ -295,10 +316,10 @@ def execute_command(client: OdooDirect, args: argparse.Namespace, policy: str = 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="odoo-direct",
-        description="Deterministic Odoo model access to a named target from .odoo/config.yaml.",
+        description="Deterministic Odoo model access to a named target from .odoo/config.toml.",
     )
     parser.add_argument("--json", action="store_true", help="Emit one machine-readable JSON object")
-    parser.add_argument("target", help="Target name declared in .odoo/config.yaml")
+    parser.add_argument("target", help="Target name declared in .odoo/config.toml")
     subparsers = parser.add_subparsers(dest="command", required=True)
     def add_read_approval(command_parser):
         command_parser.add_argument("--confirm", action="store_true")
