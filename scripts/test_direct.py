@@ -3,14 +3,17 @@
 
 import importlib.util
 import io
+import json
 import os
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 SCRIPT = Path(__file__).with_name("direct.py")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "direct"))
 SPEC = importlib.util.spec_from_file_location("odoo_direct_cli", SCRIPT)
 CLI = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
@@ -142,6 +145,167 @@ class DirectCliTests(unittest.TestCase):
             CLI.print_targets(config(), True)
         self.assertIn('"credentials": "configured"', output.getvalue())
         self.assertNotIn("hidden", output.getvalue())
+
+
+def scoped():
+    value = config()
+    value["tags"]["production"]["models"] = {
+        "helpdesk.ticket": {
+            "create": "allow",
+            "write": "allow",
+            "fields": {"stage_id": "ask"},
+            "methods": {"message_post": "allow"},
+        },
+        "res.partner": {"write": "deny"},
+    }
+    return value
+
+
+class ModelRuleTests(unittest.TestCase):
+    def test_legacy_config_unchanged(self):
+        value = config()
+        self.assertEqual(CLI.resolve_policy(value, "production", "write", model="res.partner"), "ask")
+        self.assertEqual(CLI.resolve_policy(value, "upgrade-19", "write", model="res.partner"), "allow")
+        self.assertEqual(CLI.resolve_rule(value, "production", "read")[1], "tags.production.read")
+
+    def test_model_rule_overrides_tag(self):
+        policy, source = CLI.resolve_rule(scoped(), "production", "write", model="helpdesk.ticket")
+        self.assertEqual(policy, "allow")
+        self.assertEqual(source, 'tags.production.models."helpdesk.ticket".write')
+        self.assertEqual(CLI.resolve_policy(scoped(), "production", "create", model="helpdesk.ticket"), "allow")
+
+    def test_other_models_keep_tag_policy(self):
+        self.assertEqual(CLI.resolve_policy(scoped(), "production", "write", model="sale.order"), "ask")
+        self.assertEqual(CLI.resolve_policy(scoped(), "production", "create", model="sale.order"), "ask")
+
+    def test_unlink_and_exec_not_widened(self):
+        value = scoped()
+        self.assertEqual(CLI.resolve_policy(value, "production", "unlink", model="helpdesk.ticket"), "ask")
+        self.assertEqual(
+            CLI.resolve_policy(value, "production", "exec", model="helpdesk.ticket", method="action_x"), "ask"
+        )
+
+    def test_field_rule_strictest_touched_field(self):
+        value = scoped()
+        self.assertEqual(
+            CLI.resolve_policy(value, "production", "write", model="helpdesk.ticket", fields=["name"]), "allow"
+        )
+        policy, source = CLI.resolve_rule(
+            value, "production", "write", model="helpdesk.ticket", fields=["name", "stage_id"]
+        )
+        self.assertEqual(policy, "ask")
+        self.assertEqual(source, 'tags.production.models."helpdesk.ticket".fields.stage_id')
+
+    def test_method_rule(self):
+        self.assertEqual(
+            CLI.resolve_policy(scoped(), "production", "exec", model="helpdesk.ticket", method="message_post"),
+            "allow",
+        )
+
+    def test_exec_alias_cannot_bypass_unlink(self):
+        value = scoped()
+        value["tags"]["production"]["models"]["helpdesk.ticket"]["exec"] = "allow"
+        value["tags"]["production"]["models"]["helpdesk.ticket"]["methods"]["unlink"] = "allow"
+        policy, source = CLI.resolve_rule(value, "production", "exec", model="helpdesk.ticket", method="unlink")
+        self.assertEqual(policy, "ask")
+        self.assertIn("via exec unlink", source)
+        self.assertEqual(
+            CLI.resolve_policy(value, "production", "exec", model="helpdesk.ticket", method="write"), "allow"
+        )
+        self.assertEqual(
+            CLI.resolve_policy(value, "production", "exec", model="sale.order", method="write"), "ask"
+        )
+
+    def test_model_rule_can_tighten(self):
+        self.assertEqual(CLI.resolve_policy(scoped(), "production", "write", model="res.partner"), "deny")
+
+    def test_strictest_tag_still_wins(self):
+        value = scoped()
+        value["targets"]["production"]["tags"] = ["production", "locked"]
+        self.assertEqual(CLI.resolve_policy(value, "production", "write", model="helpdesk.ticket"), "deny")
+
+    def test_invalid_rules_rejected(self):
+        value = config()
+        value["tags"]["production"]["models"] = {"helpdesk.ticket": {"wirte": "allow"}}
+        with self.assertRaisesRegex(CLI.TargetError, "unknown keys: wirte"):
+            CLI.resolve_policy(value, "production", "write", model="sale.order")
+        value["tags"]["production"]["models"] = {"helpdesk.ticket": {"write": "yes"}}
+        with self.assertRaisesRegex(CLI.TargetError, "invalid policy"):
+            CLI.resolve_policy(value, "production", "write", model="helpdesk.ticket")
+        value["tags"]["production"]["models"] = {"helpdesk.ticket": {"methods": {"message_post": "always"}}}
+        with self.assertRaisesRegex(CLI.TargetError, "invalid policy"):
+            CLI.resolve_policy(value, "production", "read")
+
+    def test_relational_commands_detected(self):
+        self.assertTrue(CLI.has_relational_commands({"tag_ids": [(4, 1)]}))
+        self.assertTrue(CLI.has_relational_commands({"line_ids": [[2, 5]]}))
+        self.assertFalse(CLI.has_relational_commands({"tag_ids": [1, 2], "name": "x"}))
+
+
+class MainPolicyTests(unittest.TestCase):
+    def run_main(self, value, argv):
+        client = MagicMock()
+        client.read.return_value = [{"id": 4, "name": "Before"}]
+        client.write.return_value = True
+        client.create.return_value = 9
+        target = {"url": "https://example.odoo.com", "database": "live", "api_key": "k", "odoo_version": 19}
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / ".odoo").mkdir()
+            env = {"ODOO_DIRECT_PROJECT_ROOT": root}
+            with patch.dict(os.environ, env, clear=True), \
+                    patch.object(CLI, "load_project_config", return_value=value), \
+                    patch.object(CLI, "target_client", return_value=(client, target, "production")), \
+                    redirect_stdout(io.StringIO()) as output:
+                CLI.main(["--json", *argv])
+            log = Path(root) / ".odoo" / CLI.AUDIT_LOG
+            lines = log.read_text().splitlines() if log.exists() else []
+        return client, json.loads(output.getvalue()), lines
+
+    def test_rule_allowed_write_runs_and_is_audited(self):
+        client, out, lines = self.run_main(
+            scoped(), ["production", "write", "helpdesk.ticket", "[4]", "{'name': 'Secret text'}"]
+        )
+        client.write.assert_called_once_with("helpdesk.ticket", [4], {"name": "Secret text"})
+        self.assertEqual(out["policy"], "allow")
+        self.assertEqual(out["rule"], 'tags.production.models."helpdesk.ticket".write')
+        self.assertEqual(len(lines), 1)
+        entry = json.loads(lines[0])
+        self.assertEqual(entry["fields"], ["name"])
+        self.assertFalse(entry["confirmed"])
+        self.assertNotIn("Secret text", lines[0])
+
+    def test_rule_allowed_create_records_new_id(self):
+        _client, _out, lines = self.run_main(scoped(), ["production", "create", "helpdesk.ticket", "{'name': 'T'}"])
+        self.assertEqual(json.loads(lines[0])["result_id"], 9)
+
+    def test_other_model_previews_without_audit(self):
+        client, out, lines = self.run_main(
+            scoped(), ["production", "write", "sale.order", "[4]", "{'name': 'After'}"]
+        )
+        client.write.assert_not_called()
+        self.assertEqual(out["result"]["status"], "preview")
+        self.assertEqual(lines, [])
+
+    def test_relational_commands_fall_back_to_ask(self):
+        client, out, _lines = self.run_main(
+            scoped(), ["production", "write", "helpdesk.ticket", "[4]", "{'name': [(2, 5)]}"]
+        )
+        client.write.assert_not_called()
+        self.assertEqual(out["policy"], "ask")
+        self.assertIn("relational commands", out["rule"])
+
+    def test_tag_level_allow_keeps_relational_commands(self):
+        client, _out, _lines = self.run_main(
+            config(), ["upgrade-19", "write", "res.partner", "[4]", "{'name': [(4, 5)]}"]
+        )
+        client.write.assert_called_once()
+
+    def test_confirmed_ask_is_audited(self):
+        client, _out, lines = self.run_main(
+            scoped(), ["production", "write", "sale.order", "[4]", "{'name': 'After'}", "--confirm"]
+        )
+        client.write.assert_called_once()
+        self.assertTrue(json.loads(lines[0])["confirmed"])
 
 
 if __name__ == "__main__":

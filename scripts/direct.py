@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -32,6 +33,17 @@ COMMANDS = frozenset(
 READ_COMMANDS = frozenset({"test", "search", "read", "search-read", "count", "fields"})
 POLICY_VALUES = {"allow": 0, "ask": 1, "deny": 2}
 POLICY_KEYS = frozenset({"read", "create", "write", "unlink", "exec"})
+RULE_KEYS = POLICY_KEYS | {"fields", "methods"}
+FIELD_OPERATIONS = frozenset({"create", "write"})
+# exec of an ORM CRUD method must also pass the policy of that operation.
+EXEC_ALIASES = {
+    "create": "create", "copy": "create",
+    "write": "write", "web_save": "write",
+    "unlink": "unlink",
+    "read": "read", "web_read": "read", "search": "read", "search_read": "read",
+    "web_search_read": "read", "search_count": "read", "fields_get": "read",
+}
+AUDIT_LOG = "odoo-direct-audit.log"
 TARGET_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
@@ -94,12 +106,64 @@ def secret_variable(target_name: str) -> str:
     return f"ODOO_DIRECT_{token}_API_KEY"
 
 
-def resolve_policy(config: dict, target_name: str, operation: str) -> str:
+def _policy(value, where: str) -> str:
+    if value not in POLICY_VALUES:
+        raise TargetError(f"{where} has invalid policy {value!r}")
+    return value
+
+
+def validate_model_rules(tag_name: str, tag: dict) -> dict:
+    """Validate the optional ``models`` table of one tag and return it."""
+    models = tag.get("models", {})
+    if not isinstance(models, dict):
+        raise TargetError(f"tags.{tag_name}.models must be a table")
+    for model, rule in models.items():
+        where = f'tags.{tag_name}.models."{model}"'
+        if not isinstance(rule, dict):
+            raise TargetError(f"{where} must be a table")
+        unknown = sorted(set(rule) - RULE_KEYS)
+        if unknown:
+            raise TargetError(f"{where} has unknown keys: {', '.join(unknown)}")
+        for key in sorted(POLICY_KEYS & rule.keys()):
+            _policy(rule[key], f"{where}.{key}")
+        for section in ("fields", "methods"):
+            entries = rule.get(section, {})
+            if not isinstance(entries, dict):
+                raise TargetError(f"{where}.{section} must be a table")
+            for name, value in entries.items():
+                _policy(value, f"{where}.{section}.{name}")
+    return models
+
+
+def tag_rule(tag_name: str, tag: dict, operation: str, model=None, method=None, fields=None):
+    """Return ``(policy, source)`` for one tag; the most specific matching rule wins."""
+    policy, source = tag[operation], f"tags.{tag_name}.{operation}"
+    models = validate_model_rules(tag_name, tag)
+    rule = models.get(model) if model else None
+    if rule is None:
+        return policy, source
+    base = f'tags.{tag_name}.models."{model}"'
+    if operation in rule:
+        policy, source = rule[operation], f"{base}.{operation}"
+    if operation == "exec" and method in rule.get("methods", {}):
+        return rule["methods"][method], f"{base}.methods.{method}"
+    field_rules = rule.get("fields", {})
+    if operation in FIELD_OPERATIONS and fields and field_rules:
+        candidates = [
+            (field_rules[name], f"{base}.fields.{name}") if name in field_rules else (policy, source)
+            for name in fields
+        ]
+        policy, source = max(candidates, key=lambda item: POLICY_VALUES[item[0]])
+    return policy, source
+
+
+def resolve_rule(config: dict, target_name: str, operation: str, model=None, method=None, fields=None):
+    """Return ``(policy, source)``: most specific rule per tag, strictest across tags."""
     target = config["targets"][target_name]
     tag_names = target.get("tags")
     if not isinstance(tag_names, list) or not tag_names:
         raise TargetError(f"Target {target_name!r} must declare at least one tag.")
-    values = []
+    results = []
     for tag_name in tag_names:
         tag = config.get("tags", {}).get(tag_name)
         if not isinstance(tag, dict):
@@ -110,8 +174,62 @@ def resolve_policy(config: dict, target_name: str, operation: str) -> str:
         invalid = {key: tag[key] for key in POLICY_KEYS if tag[key] not in POLICY_VALUES}
         if invalid:
             raise TargetError(f"Tag {tag_name!r} has invalid policies: {invalid}")
-        values.append(tag[operation])
-    return max(values, key=POLICY_VALUES.__getitem__)
+        results.append(tag_rule(tag_name, tag, operation, model, method, fields))
+    if operation == "exec" and method in EXEC_ALIASES:
+        aliased, via = resolve_rule(config, target_name, EXEC_ALIASES[method], model)
+        results.append((aliased, f"{via} (via exec {method})"))
+    return max(results, key=lambda item: POLICY_VALUES[item[0]])
+
+
+def resolve_policy(config: dict, target_name: str, operation: str, **scope) -> str:
+    return resolve_rule(config, target_name, operation, **scope)[0]
+
+
+def has_relational_commands(values: dict) -> bool:
+    """True when any value is an x2many command list such as ``[(2, 5)]``."""
+    return any(
+        isinstance(value, (list, tuple)) and any(isinstance(item, (list, tuple)) for item in value)
+        for value in values.values()
+    )
+
+
+def scoped_policy(config: dict, args: argparse.Namespace):
+    """Resolve the policy for a parsed command. Returns ``(policy, source, fields)``."""
+    values = parse_literal(args.values, "values", dict) if args.command in FIELD_OPERATIONS else None
+    fields = sorted(values) if values else None
+    policy, source = resolve_rule(
+        config, args.target, args.operation,
+        model=getattr(args, "model", None), method=getattr(args, "method", None), fields=fields,
+    )
+    if policy == "allow" and ".models." in source and values and has_relational_commands(values):
+        policy, source = "ask", f"{source} (relational commands need approval)"
+    return policy, source, fields
+
+
+def audit(args, label: str, target_config: dict, policy: str, source: str, fields, result) -> None:
+    """Append one JSON line per executed change. Values are never logged."""
+    if args.operation == "read" or (isinstance(result, dict) and result.get("status") == "preview"):
+        return
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "target": label,
+        "database": target_config["database"],
+        "operation": args.operation,
+        "model": getattr(args, "model", None),
+        "method": getattr(args, "method", None),
+        "ids": getattr(args, "ids", None),
+        "fields": fields,
+        "policy": policy,
+        "rule": source,
+        "confirmed": bool(getattr(args, "confirm", False)),
+        "result_id": result.get("result") if args.operation == "create" and isinstance(result, dict) else None,
+    }
+    try:
+        path = resolve_git_root() / ".odoo" / AUDIT_LOG
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, sort_keys=True, default=str) + "\n")
+    except (OSError, TargetError) as exc:
+        print(f"Warning: audit log not written: {exc}", file=sys.stderr)
 
 
 def target_client(config: dict, target_name: str):
@@ -388,14 +506,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     args = build_parser().parse_args(raw)
     client, target_config, label = target_client(config, args.target)
-    policy = resolve_policy(config, args.target, args.operation)
+    policy, source, fields = scoped_policy(config, args)
     endpoint = urlsplit(target_config["url"]).netloc or "invalid-host"
     if not args.json:
         print(f"Target: {label}")
         print(f"Database: {target_config['database']}")
         print(f"Endpoint: {endpoint}", flush=True)
-        print(f"Policy: {args.operation}={policy}", flush=True)
+        print(f"Policy: {args.operation}={policy} ({source})", flush=True)
     result = execute_command(client, args, policy)
+    audit(args, label, target_config, policy, source, fields, result)
     if args.json:
         print(json.dumps({
             "target": label,
@@ -403,6 +522,7 @@ def main(argv: list[str] | None = None) -> int:
             "endpoint": endpoint,
             "policy": policy,
             "result": result,
+            "rule": source,
         }, sort_keys=True))
     else:
         render_result(args.command, result)

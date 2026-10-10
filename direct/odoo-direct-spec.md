@@ -31,6 +31,63 @@ the strictest value using `deny > ask > allow`. Policy comes only from
 - `ask` previews and requires the unchanged command with `--confirm`.
 - `deny` stops before an Odoo call.
 
+### Model rules
+
+A tag may override its policies for one model. Rules are optional; a tag
+without `models` behaves exactly as above.
+
+```toml
+[tags.production]
+read = "allow"
+create = "ask"
+write = "ask"
+unlink = "ask"
+exec = "ask"
+
+[tags.production.models."helpdesk.ticket"]
+create = "allow"
+write = "allow"
+fields = { stage_id = "ask" }          # create/write touching stage_id asks
+methods = { message_post = "ask" }     # exec of one method
+
+[tags.production.models."res.partner"]
+write = "deny"
+```
+
+A model table accepts the five operation keys plus `fields` and `methods`.
+Every value is `allow`, `ask`, or `deny`; unknown keys and invalid values fail
+the command.
+
+Precedence:
+
+1. Inside one tag the most specific matching rule wins: tag operation, then
+   model operation, then `fields.<name>` (create and write) or
+   `methods.<name>` (exec). A specific rule may loosen or tighten.
+2. A create or write that touches several fields takes the strictest of the
+   touched fields.
+3. Across a target's tags the strictest result still wins. Add a tag such as
+   `locked` to impose a deny no model rule can lift.
+4. `exec` of an ORM CRUD method (`create`, `copy`, `write`, `web_save`,
+   `unlink`, `read`, `web_read`, `search`, `search_read`, `web_search_read`,
+   `search_count`, `fields_get`) must also pass that operation's policy for
+   the model, so `exec` cannot bypass `unlink` or `write`.
+5. When `allow` comes from a model or field rule and the values contain x2many
+   command lists such as `[(2, 5)]`, the command falls back to `ask`. Tag-level
+   `allow` is unaffected.
+
+The output `Policy:` line and the JSON `rule` key name the deciding rule.
+Older odoo-direct versions ignore `models`, so a loosening rule fails closed
+(the tag policy applies) but a tightening rule is ignored there; impose hard
+denies with an extra tag until every machine runs this version.
+
+### Audit log
+
+Every executed `create`, `write`, `unlink`, or `exec` (allowed or confirmed)
+appends one JSON line to `.odoo/odoo-direct-audit.log`: UTC time, target,
+database, operation, model, method, IDs, touched field names, policy, rule,
+whether `--confirm` was given, and the new ID for creates. Values are never
+logged. Previews and reads are not logged. Keep the file Git-ignored.
+
 ## Transport
 
 JSON-2 calls use `POST /json/2/<model>/<method>`, bearer authorization, and an

@@ -4,11 +4,15 @@
 import io
 import json
 import socket
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
 
-from odoo_direct import (
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from odoo_direct import (  # noqa: E402
     OdooAuthError,
     OdooDirect,
     OdooError,
