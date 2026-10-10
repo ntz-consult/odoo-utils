@@ -32,3 +32,15 @@ Configure a declared target's API key with `odoo-direct-init TARGET`. Inspect
 targets and their credential status with `odoo-direct targets`.
 
 Run each command with `--help` for its complete options.
+
+Refresh a local database from an Odoo.sh daily backup (no project data in this repo):
+
+```bash
+odoo_sh_refresh.py --config CONFIG.toml --check      # read-only preflight
+odoo_sh_refresh.py --config CONFIG.toml --rehearse   # everything up to the swap; never swaps
+odoo_sh_refresh.py --config CONFIG.toml              # full run
+```
+
+The config names the SSH source, the target database and checkout, the lock, the state
+folder and the project SQL (see the docstring). A run never triggers an Odoo.sh backup,
+never starts or stops an Odoo server, and refuses to swap while the live Odoo is running.
