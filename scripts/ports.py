@@ -466,8 +466,11 @@ def ports_lock(environ=None):
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def worktree_text(database: str, ports: dict[str, int]) -> str:
+def worktree_text(database: str, ports: dict[str, int], data_dir: Path) -> str:
+    # data_dir is written here because the committed config.toml carries the primary's path,
+    # and the filestore must be the worktree's own folder.
     return (
+        f'[odoo]\ndata_dir = "{data_dir}"\n\n'
         f'[database]\nname = "{database}"\n\n'
         f'[ports]\nhttp = {ports["http"]}\ngevent = {ports["gevent"]}\n'
         f'test_http = {ports["test_start"]}\ntest_gevent = {ports["test_start"] + 1}\n'
@@ -525,7 +528,7 @@ def assign(register: Register | None, project: str, root: Path, database: str,
                 raise PortError(f"port {port} is also assigned to {', '.join(others)}")
         path = root / ".odoo" / "worktree.toml"
         path.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write(path, worktree_text(database, ports))
+        _atomic_write(path, worktree_text(database, ports, root / ".odoo" / "data"))
     return ports
 
 
