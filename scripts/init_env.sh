@@ -62,6 +62,15 @@ if [[ "$WORKTREE" == true ]]; then
     if [[ "$MAIN_WORKTREE" != "$PROJECT_ROOT" && -f "$MAIN_WORKTREE/.odoo/secrets.env" ]]; then
         ln -sfn "$MAIN_WORKTREE/.odoo/secrets.env" "$SECRETS_FILE"
     fi
+    # The agent-rules overlay (AGENTS.md, PROJECT_RULES.md, .odoo-sh-rules) is untracked and
+    # ignored, so `git worktree add` does not bring it. Install it from the primary checkout.
+    LINKER="$MAIN_WORKTREE/.odoo-sh-rules/scripts/link-repository"
+    if [[ "$MAIN_WORKTREE" != "$PROJECT_ROOT" && -x "$LINKER" && -f "$MAIN_WORKTREE/PROJECT_RULES.md" ]]; then
+        [[ -e "$PROJECT_ROOT/PROJECT_RULES.md" ]] || cp -p "$MAIN_WORKTREE/PROJECT_RULES.md" "$PROJECT_ROOT/PROJECT_RULES.md"
+        "$LINKER" "$PROJECT_ROOT" >/dev/null \
+            || echo "Warning: could not link the agent rules into $PROJECT_ROOT; run: $LINKER $PROJECT_ROOT" >&2
+        [[ -e "$PROJECT_ROOT/CLAUDE.md" || ! -e "$PROJECT_ROOT/AGENTS.md" ]] || ln -s AGENTS.md "$PROJECT_ROOT/CLAUDE.md"
+    fi
     echo "Created explicit worktree allocation: $WORKTREE_FILE"
     exit 0
 fi

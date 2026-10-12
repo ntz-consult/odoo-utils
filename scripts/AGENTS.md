@@ -21,6 +21,10 @@ odoo-init-env --worktree --db REPO_BRANCH --http-port 8201 --test-range-start 97
 With a port register (below) `--http-port` and `--test-range-start` are optional:
 the command takes the first free slot of the project's pool.
 
+The command also installs the primary checkout's untracked agent-rules overlay
+(`PROJECT_RULES.md`, `AGENTS.md`, `.odoo-sh-rules`) when it has one, through its
+`scripts/link-repository`.
+
 The command symlinks `secrets.env` from the primary checkout. It records the
 worktree database and ports in `.odoo/worktree.toml`; configuration never merges
 from a parent repository.
