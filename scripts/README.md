@@ -43,4 +43,4 @@ odoo_sh_refresh.py --config CONFIG.toml              # full run
 
 The config names the SSH source, the target database and checkout, the lock, the state
 folder and the project SQL (see the docstring). A run never triggers an Odoo.sh backup,
-never starts or stops an Odoo server, and refuses to swap while the live Odoo is running.
+never starts an Odoo server. At the swap it stops the live Odoo of the checkout, if one is running, and does not restart it.

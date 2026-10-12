@@ -50,13 +50,14 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 import tomllib
 from pathlib import Path
 
 SAST = dt.timezone(dt.timedelta(hours=2))
 SSH_OPTIONS = ["-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "LogLevel=ERROR"]
 CARRIED = ("restored_backup_utc", "filestore_copied")
-ODOO_RUNNING = "skipped:odoo-running"
+
 
 
 class Failed(Exception):
@@ -199,6 +200,17 @@ class Refresh:
         return subprocess.run(["pgrep", "-f", "[o]doo-bin -c %s" % self.conf],
                               stdout=subprocess.DEVNULL).returncode == 0
 
+    def stop_odoo(self):
+        """Close the live Odoo of this checkout (its tmux session, then any process left). Not restarted."""
+        subprocess.run(["tmux", "kill-session", "-t", self.session],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["pkill", "-f", "[o]doo-bin -c %s" % self.conf])
+        for _ in range(30):
+            if not self.odoo_running():
+                return
+            time.sleep(1)
+        raise Failed("swap", "Odoo for %s did not stop" % self.checkout)
+
     def remote_backup(self):
         reply = self.ssh("stat -c '%%Y %%s' %s" % shlex.quote(self.dump_remote), "preflight").splitlines()[-1]
         mtime, size = reply.split()
@@ -281,19 +293,24 @@ class Refresh:
         log("restored into %s with %d accepted error(s)" % (self.new, len(errors)))
 
     def odoo_command(self, *args):
+        """odoo-bin with a private copy of the checkout's config. Other tools stop the live Odoo with
+        `pkill -f <checkout conf>`; a different path keeps the refresh's own Odoo runs out of their reach."""
+        private = self.state / "odoo.conf"
+        shutil.copyfile(self.conf, private)
+        os.chmod(private, 0o600)
         return [str(self.python), str(self.odoo_bin), *args]
 
     def update(self):
         self.step("update")
         env = dict(os.environ, PATH="%s:%s" % (self.python.parent, os.environ["PATH"]))
-        run(self.odoo_command("-c", str(self.conf), "-d", self.new, "-u", "all", "--stop-after-init",
+        run(self.odoo_command("-c", str(self.state / "odoo.conf"), "-d", self.new, "-u", "all", "--stop-after-init",
                               "--no-http", "--max-cron-threads=0"),
             "update", cwd=self.checkout, env=env, log_file=self.state / "update.log")
         log("modules updated to the checkout's code")
 
     def neutralize(self):
         self.step("neutralize")
-        run(self.odoo_command("neutralize", "-c", str(self.conf), "-d", self.new), "neutralize",
+        run(self.odoo_command("neutralize", "-c", str(self.state / "odoo.conf"), "-d", self.new), "neutralize",
             cwd=self.checkout, log_file=self.state / "neutralize.log")
         run(["psql", "-X", "-q", "-h", "localhost", "-U", "odoo", "-d", self.new, "-v", "ON_ERROR_STOP=1",
              "-f", str(self.neutralize_sql)], "neutralize", log_file=self.state / "neutralize-sql.log")
@@ -323,7 +340,9 @@ class Refresh:
     def swap(self):
         self.step("swap")
         if self.odoo_running():
-            raise Skip(ODOO_RUNNING, "Odoo for %s is running; it is not stopped, nothing was swapped" % self.checkout)
+            self.stop_odoo()
+            self.status.update(stopped_odoo=True)
+            log("stopped the running Odoo of %s; it is not restarted" % self.checkout.name)
         self.terminate(self.db)
         self.terminate(self.new)
         live, spare, fresh = (self.filestore_path(n) for n in (self.db, self.old, self.new))
@@ -403,8 +422,6 @@ class Refresh:
             if self.args.check:
                 self.status.update(result="checked", message="preflight only; nothing changed")
                 return
-            if self.odoo_running() and not self.args.rehearse:
-                raise Skip(ODOO_RUNNING, "Odoo for %s is running; not touched, nothing changed" % self.checkout)
             self.drop_new()
             self.download()
             self.filestore()
