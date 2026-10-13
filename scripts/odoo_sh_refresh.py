@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
 """Refresh a local Odoo database from the newest existing Odoo.sh daily backup.
 
+It does three things and no other database work:
+  1. fetch the newest daily backup over SSH and write its SQL to the project's .odoo/dump.sql
+     (the filestore too, on its days or with --filestore);
+  2. call the project's own `odoo-fresh` (drop, create, restore from .odoo/dump.sql);
+  3. neutralise: the stock neutralize.sql of every installed module (what `odoo-bin neutralize`
+     runs), then the project SQL, whose checks must pass.
+
 Generic: every host, path and project detail comes from the TOML file given with --config.
-The run never triggers a backup on Odoo.sh and never starts an Odoo server.
+The run never triggers a backup on Odoo.sh. It stops the checkout's running Odoo before
+odoo-fresh (odoo-fresh cannot drop a database that is in use) and leaves it stopped, unless
+--restart is given.
 
     [source]
     ssh = "user@project.odoo.com"              # SSH target of the Odoo.sh project
@@ -11,37 +20,34 @@ The run never triggers a backup on Odoo.sh and never starts an Odoo server.
     filestore = "/home/odoo/backup.daily/<name>_daily/home/odoo/data/filestore/<name>"
 
     [target]
-    database = "ibcorr"                        # the live database; replaced at the swap
-    checkout = "~/Work/ibcorr"                 # Odoo checkout with .odoo/
-    odoo_bin = "~/Odoo/V19/odoo/odoo-bin"
-    conf = ".odoo/odoo.conf"                   # relative to checkout
-    venv = ".venv"                             # relative to checkout; its python runs odoo-bin
-    data_dir = "~/Work/ibcorr/.odoo/data"      # filestore lives in <data_dir>/filestore/<db>
-    session = "odoo-ibcorr"                    # tmux session of the live Odoo; stopped at the swap
-    lock = "~/.cache/ibcorr-db-refresh.lock"   # shared with the worktree refresh
-    state_dir = "~/.local/state/odoo-refresh/ibcorr"
+    database = "ropeworx"                      # must be database.name in the checkout's .odoo/config.toml
+    checkout = "~/Work/ropeworx"               # Odoo checkout with .odoo/
+    conf = ".odoo/odoo.conf"                   # relative to checkout; finds the running Odoo and the addons path
+    data_dir = "~/Work/ropeworx/.odoo/data"    # filestore lives in <data_dir>/filestore/<db>
+    session = "ropeworx-main"                  # tmux session of the live Odoo, closed with it (may not exist)
+    lock = "~/.cache/ropeworx-db-refresh.lock"
+    state_dir = "~/.local/state/odoo-refresh/ropeworx"
     data_source = ".odoo/data-source"          # relative to checkout; first line is read by ibcorr-ports
-    after = ["ibcorr-local-login", "ibcorr-test-user"]   # run in the checkout after the swap
+    after = []                                 # commands run in the checkout after a good run
 
     [run]
+    fresh = "~/.local/share/odoo/bin/odoo-fresh"   # the global odoo-fresh; required
+    odoo_run = "~/.local/share/odoo/bin/odoo-run"  # used by --restart
     filestore_days = ["Sun"]                   # copy the filestore on these days (SAST)
     min_free_gb = 10
     min_backup_age_min = 20                    # refuse a backup that is still being written
-    allowed_restore_errors = 1                 # restore errors that are known and accepted
-    min_ratio = 0.9                            # new row counts must be this share of the old
-    count_tables = ["account_move", "sale_order", "res_users|login not in ('odoo', 'admin')"]
-    neutralize_sql = "~/Work/sys-admin/bin/ibcorr-neutralize.sql"
+    allowed_restore_errors = 0                 # psql ERROR lines odoo-fresh may print
+    neutralize_sql = "~/Work/sys-admin/bin/ropeworx-neutralize.sql"
 
-Steps: lock -> preflight -> download the dump -> filestore -> restore into <database>_new
--> update all modules -> neutralise (odoo-bin, then the project SQL with its checks)
--> row counts -> swap -> data-source stamp -> after-hooks.
+Steps: lock -> preflight -> download (dump.sql) -> stop Odoo -> filestore -> odoo-fresh
+-> neutralise -> data-source stamp -> after-hooks [-> restart Odoo].
 
-Any failure before the swap drops <database>_new and its filestore; <database> stays as it was.
-The swap is the only step that changes <database>. A failed swap is rolled back. The previous
-copy is dropped right after a good swap. The latest dump is kept (mode 600) in state_dir.
+odoo-fresh replaces the database in place; there is no copy to fall back to. A run fails before
+odoo-fresh if anything other than the stopped Odoo is still connected to the database.
 """
 
 import argparse
+import configparser
 import datetime as dt
 import fcntl
 import json
@@ -57,7 +63,6 @@ from pathlib import Path
 SAST = dt.timezone(dt.timedelta(hours=2))
 SSH_OPTIONS = ["-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "LogLevel=ERROR"]
 CARRIED = ("restored_backup_utc", "filestore_copied")
-
 
 
 class Failed(Exception):
@@ -112,36 +117,36 @@ class Refresh:
     def __init__(self, config, args):
         self.args = args
         src, tgt, rules = config["source"], config["target"], config["run"]
+        if "fresh" not in rules:
+            raise SystemExit("config has no [run] fresh: this version only restores through odoo-fresh; "
+                             "set fresh = \"~/.local/share/odoo/bin/odoo-fresh\" after checking the project fits")
         self.ssh_target = src["ssh"]
         self.key = path(src["key"])
         self.dump_remote = src["dump"]
         self.filestore_remote = src["filestore"]
         self.db = tgt["database"]
-        self.new = self.db + "_new"
-        self.old = self.db + "_old"
         self.checkout = path(tgt["checkout"])
-        self.odoo_bin = path(tgt["odoo_bin"])
         self.conf = self.checkout / tgt["conf"]
-        self.python = self.checkout / tgt["venv"] / "bin" / "python"
         self.data_dir = path(tgt["data_dir"])
         self.session = tgt["session"]
         self.lock_file = path(tgt["lock"])
         self.state = path(tgt["state_dir"])
         self.data_source = self.checkout / tgt["data_source"]
         self.after = tgt.get("after", [])
+        self.fresh = path(rules["fresh"])
+        self.odoo_run = path(rules.get("odoo_run", "~/.local/share/odoo/bin/odoo-run"))
         self.days = rules["filestore_days"]
         self.min_free = rules["min_free_gb"] * 1024 ** 3
         self.min_age = dt.timedelta(minutes=rules["min_backup_age_min"])
         self.allowed_errors = rules["allowed_restore_errors"]
-        self.min_ratio = rules["min_ratio"]
-        self.count_tables = rules["count_tables"]
         self.neutralize_sql = path(rules["neutralize_sql"])
         self.status_file = self.state / "status.json"
         self.history = self.state / "history.log"
-        self.dump = self.state / "prod.sql.gz"
+        self.gz = self.state / "prod.sql.gz"
+        self.dump = self.checkout / ".odoo" / "dump.sql"
         self.started = now()
         self.warnings = []
-        self.swapped = False
+        self.was_running = False
         self.previous = self.load_previous()
         # Facts about the live database survive a failed run; the rest describes this run only.
         self.status = {k: self.previous[k] for k in CARRIED if k in self.previous}
@@ -189,19 +194,18 @@ class Refresh:
         return run(["psql", "-X", "-q", "-h", "localhost", "-U", "odoo", "-d", database,
                     "-v", "ON_ERROR_STOP=1", "-Atc", sql], step).strip()
 
-    def database_exists(self, name):
-        return self.psql("select 1 from pg_database where datname = '%s'" % name) == "1"
+    def database_oid(self):
+        return self.psql("select oid from pg_database where datname = '%s'" % self.db)
 
-    def terminate(self, name):
-        self.psql("select pg_terminate_backend(pid) from pg_stat_activity "
-                  "where datname = '%s' and pid <> pg_backend_pid()" % name)
+    def connections(self):
+        return int(self.psql("select count(*) from pg_stat_activity where datname = '%s'" % self.db))
 
     def odoo_running(self):
         return subprocess.run(["pgrep", "-f", "[o]doo-bin -c %s" % self.conf],
                               stdout=subprocess.DEVNULL).returncode == 0
 
     def stop_odoo(self):
-        """Close the live Odoo of this checkout (its tmux session, then any process left). Not restarted."""
+        """Close the live Odoo of this checkout (its tmux session, then any process left)."""
         subprocess.run(["tmux", "kill-session", "-t", self.session],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(["pkill", "-f", "[o]doo-bin -c %s" % self.conf])
@@ -209,27 +213,27 @@ class Refresh:
             if not self.odoo_running():
                 return
             time.sleep(1)
-        raise Failed("swap", "Odoo for %s did not stop" % self.checkout)
+        raise Failed("stop", "Odoo for %s did not stop" % self.checkout)
 
     def remote_backup(self):
         reply = self.ssh("stat -c '%%Y %%s' %s" % shlex.quote(self.dump_remote), "preflight").splitlines()[-1]
         mtime, size = reply.split()
         return dt.datetime.fromtimestamp(int(mtime), dt.timezone.utc), int(size)
 
-    def filestore_path(self, name):
-        return self.data_dir / "filestore" / name
-
-    def drop_new(self):
-        """Remove a leftover or failed <database>_new and its filestore. Never touches <database>."""
-        if self.database_exists(self.new):
-            self.terminate(self.new)
-            self.psql('drop database "%s"' % self.new)
-        shutil.rmtree(self.filestore_path(self.new), ignore_errors=True)
+    def addons_paths(self):
+        """The conf's addons_path plus Odoo's own odoo/odoo/addons (base, web), which Odoo adds itself."""
+        parser = configparser.ConfigParser()
+        parser.read(self.conf)
+        paths = [Path(p.strip()) for p in parser.get("options", "addons_path").split(",") if p.strip()]
+        core = [p.parent / "odoo" / "addons" for p in paths if (p.parent / "odoo" / "addons" / "base").is_dir()]
+        return core[:1] + paths
 
     # ---- steps -------------------------------------------------------------------------
 
     def preflight(self):
         self.step("preflight")
+        if not self.fresh.is_file():
+            raise Failed("preflight", "odoo-fresh not found: %s" % self.fresh)
         backup, size = self.remote_backup()
         age = now() - backup
         if age < self.min_age:
@@ -243,148 +247,91 @@ class Refresh:
             raise Skip("skipped:no-new-backup", "backup %s is already restored" % self.status["backup_utc"])
         log("backup: %s (%.0f MB)" % (self.status["backup_utc"], size / 1024 ** 2))
         log("live %s: %s connection(s); Odoo %s" % (
-            self.db, self.psql("select count(*) from pg_stat_activity where datname = '%s'" % self.db),
-            "running" if self.odoo_running() else "not running"))
+            self.db, self.connections(), "running" if self.odoo_running() else "not running"))
 
     def download(self):
+        """Fetch the gzipped dump into state_dir, check it, and unpack it to .odoo/dump.sql (mode 600)."""
         self.step("download")
-        self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
         part = self.state / "prod.sql.gz.part"
         self.rsync("%s:%s" % (self.ssh_target, self.dump_remote), str(part), "download", extra=["--partial"])
         if part.stat().st_size != self.backup_size:
             raise Failed("download", "size %d, expected %d" % (part.stat().st_size, self.backup_size))
         run(["gzip", "-t", str(part)], "download")
         os.chmod(part, 0o600)
-        os.replace(part, self.dump)
-        log("dump downloaded and checked: %s" % self.dump.name)
+        os.replace(part, self.gz)
+        sql_part = self.dump.with_suffix(".sql.part")
+        with open(sql_part, "wb") as handle:
+            os.chmod(sql_part, 0o600)
+            done = subprocess.run(["gunzip", "-c", str(self.gz)], stdout=handle)
+        if done.returncode:
+            sql_part.unlink(missing_ok=True)
+            raise Failed("download", "gunzip exited %d" % done.returncode)
+        os.replace(sql_part, self.dump)
+        log("dump written to %s (%.0f MB)" % (self.dump, self.dump.stat().st_size / 1024 ** 2))
+
+    def stop(self):
+        self.step("stop")
+        if self.odoo_running():
+            self.was_running = True
+            self.stop_odoo()
+            self.status.update(stopped_odoo=True)
+            log("stopped the running Odoo of %s" % self.checkout.name)
+        left = self.connections()
+        if left:
+            raise Failed("stop", "%d connection(s) to %s remain; odoo-fresh would not drop it" % (left, self.db))
 
     def filestore(self):
         self.step("filestore")
-        target = self.filestore_path(self.new)
-        target.parent.mkdir(parents=True, exist_ok=True)
         today = dt.datetime.now(SAST)
-        if self.args.filestore or today.strftime("%a") in self.days:
-            target.mkdir()
-            self.rsync("%s:%s/" % (self.ssh_target, self.filestore_remote), "%s/" % target, "filestore",
-                       extra=["--delete"])
-            self.status["filestore_copied"] = today.strftime("%Y-%m-%d")
-            log("filestore copied from Odoo.sh")
-        else:
-            source = self.filestore_path(self.db)
-            if not source.is_dir():
-                raise Failed("filestore", "no filestore to copy from: %s" % source)
-            run(["cp", "-al", str(source), str(target)], "filestore")
-            log("filestore hard-linked from the current copy (not a filestore day)")
+        if not (self.args.filestore or today.strftime("%a") in self.days):
+            log("filestore kept (not a filestore day)")
+            return
+        target = self.data_dir / "filestore" / self.db
+        target.mkdir(parents=True, exist_ok=True)
+        self.rsync("%s:%s/" % (self.ssh_target, self.filestore_remote), "%s/" % target, "filestore",
+                   extra=["--delete"])
+        self.status["filestore_copied"] = today.strftime("%Y-%m-%d")
+        log("filestore copied from Odoo.sh")
 
-    def restore(self):
-        self.step("restore")
-        self.psql('create database "%s" owner odoo' % self.new)
-        run(["sudo", "-n", "-u", "postgres", "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1",
-             "-d", self.new, "-c", "create extension if not exists vector"], "restore")
-        log_file = self.state / "restore.log"
-        command = "set -o pipefail; gunzip -c %s | psql -X -q -h localhost -U odoo -d %s -v ON_ERROR_STOP=0" % (
-            shlex.quote(str(self.dump)), shlex.quote(self.new))
-        run(command, "restore", shell=True, log_file=log_file)
-        errors = [line for line in log_file.read_text(errors="replace").splitlines() if line.startswith("ERROR:")]
+    def fresh_restore(self):
+        """odoo-fresh drops, creates and restores the database from .odoo/dump.sql. Its psql restore does
+        not stop on errors, so the result is checked here: a new database, no unexpected errors.
+        TERM must name a real terminal: odoo-fresh runs `clear` under `set -e` (from common.sh)."""
+        self.step("odoo-fresh")
+        before = self.database_oid()
+        log_file = self.state / "odoo-fresh.log"
+        run([str(self.fresh)], "odoo-fresh", cwd=self.checkout, env=dict(os.environ, TERM="xterm"),
+            log_file=log_file)
+        after = self.database_oid()
+        if not after or after == before:
+            raise Failed("odoo-fresh", "%s was not recreated; see %s" % (self.db, log_file))
+        errors = [line for line in log_file.read_text(errors="replace").splitlines() if "ERROR:" in line]
         self.status.update(restore_errors=len(errors))
-        if len(errors) > self.allowed_errors:
-            raise Failed("restore", "%d restore errors (allowed %d); first: %s" % (
-                len(errors), self.allowed_errors, errors[:3]))
-        log("restored into %s with %d accepted error(s)" % (self.new, len(errors)))
-
-    def odoo_command(self, *args):
-        """odoo-bin with a private copy of the checkout's config. Other tools stop the live Odoo with
-        `pkill -f <checkout conf>`; a different path keeps the refresh's own Odoo runs out of their reach."""
-        private = self.state / "odoo.conf"
-        shutil.copyfile(self.conf, private)
-        os.chmod(private, 0o600)
-        return [str(self.python), str(self.odoo_bin), *args]
-
-    def update(self):
-        self.step("update")
-        env = dict(os.environ, PATH="%s:%s" % (self.python.parent, os.environ["PATH"]))
-        run(self.odoo_command("-c", str(self.state / "odoo.conf"), "-d", self.new, "-u", "all", "--stop-after-init",
-                              "--no-http", "--max-cron-threads=0"),
-            "update", cwd=self.checkout, env=env, log_file=self.state / "update.log")
-        log("modules updated to the checkout's code")
+        log("odoo-fresh restored %s with %d error line(s)" % (self.db, len(errors)))
+        return errors
 
     def neutralize(self):
         self.step("neutralize")
-        run(self.odoo_command("neutralize", "-c", str(self.state / "odoo.conf"), "-d", self.new), "neutralize",
-            cwd=self.checkout, log_file=self.state / "neutralize.log")
-        run(["psql", "-X", "-q", "-h", "localhost", "-U", "odoo", "-d", self.new, "-v", "ON_ERROR_STOP=1",
+        installed = self.psql("select name from ir_module_module where state = 'installed'", self.db,
+                              "neutralize").split()
+        files = []
+        for module in installed:
+            for base in self.addons_paths():
+                candidate = base / module / "data" / "neutralize.sql"
+                if candidate.is_file():
+                    files.append(candidate)
+                    break
+        stock = ["psql", "-X", "-q", "-1", "-h", "localhost", "-U", "odoo", "-d", self.db, "-v", "ON_ERROR_STOP=1"]
+        for candidate in files:
+            stock += ["-f", str(candidate)]
+        stock += ["-c", "INSERT INTO ir_config_parameter (key, value, create_date) "
+                        "VALUES ('database.is_neutralized', 'True', now()) "
+                        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"]
+        run(stock, "neutralize", log_file=self.state / "neutralize-stock.log")
+        log("stock neutralise SQL of %d installed module(s) applied" % len(files))
+        run(["psql", "-X", "-q", "-h", "localhost", "-U", "odoo", "-d", self.db, "-v", "ON_ERROR_STOP=1",
              "-f", str(self.neutralize_sql)], "neutralize", log_file=self.state / "neutralize-sql.log")
         log("neutralised and checked (%s)" % self.neutralize_sql.name)
-
-    def counts(self, database):
-        """Row counts per table. An entry 'table|where' counts only the rows matching the condition."""
-        selects = []
-        for entry in self.count_tables:
-            table, _, condition = entry.partition("|")
-            selects.append("select '%s', count(*) from \"%s\"%s" % (
-                table, table, " where " + condition if condition else ""))
-        rows = self.psql(" union all ".join(selects), database, "counts")
-        return {name: int(value) for name, value in (line.split("|") for line in rows.splitlines())}
-
-    def sanity(self):
-        self.step("sanity")
-        old, new = self.counts(self.db), self.counts(self.new)
-        tables = [entry.partition("|")[0] for entry in self.count_tables]
-        self.status.update(row_counts={t: [old[t], new[t]] for t in old})
-        for table in old:
-            if old[table] and new[table] < self.min_ratio * old[table]:
-                raise Failed("sanity", "%s: %d rows in the new copy, %d in %s" % (
-                    table, new[table], old[table], self.db))
-        log("row counts ok: %s" % ", ".join("%s %d" % (t, new[t]) for t in tables))
-
-    def swap(self):
-        self.step("swap")
-        if self.odoo_running():
-            self.stop_odoo()
-            self.status.update(stopped_odoo=True)
-            log("stopped the running Odoo of %s; it is not restarted" % self.checkout.name)
-        self.terminate(self.db)
-        self.terminate(self.new)
-        live, spare, fresh = (self.filestore_path(n) for n in (self.db, self.old, self.new))
-        done = []
-        try:
-            self.psql('alter database "%s" rename to "%s"' % (self.db, self.old))
-            done.append("db-old")
-            self.psql('alter database "%s" rename to "%s"' % (self.new, self.db))
-            done.append("db-new")
-            if live.is_dir():
-                os.rename(live, spare)
-                done.append("fs-old")
-            os.rename(fresh, live)
-            done.append("fs-new")
-        except (Failed, OSError) as exc:
-            self.revert_swap(done, live, spare, fresh)
-            raise Failed("swap", "swap reverted: %s" % exc)
-        self.swapped = True
-        log("swapped: %s is the new copy" % self.db)
-
-    def revert_swap(self, done, live, spare, fresh):
-        steps = {
-            "fs-new": lambda: os.rename(live, fresh),
-            "fs-old": lambda: os.rename(spare, live),
-            "db-new": lambda: self.psql('alter database "%s" rename to "%s"' % (self.db, self.new)),
-            "db-old": lambda: self.psql('alter database "%s" rename to "%s"' % (self.old, self.db)),
-        }
-        for name in reversed(done):
-            try:
-                steps[name]()
-            except Exception as exc:  # report every part that could not be put back
-                self.warnings.append("swap revert %s failed: %s" % (name, exc))
-
-    def cleanup_old(self):
-        """Drop the previous copy after a good swap. A failure here is a warning, not a failed run."""
-        try:
-            self.terminate(self.old)
-            self.psql('drop database "%s"' % self.old)
-            shutil.rmtree(self.filestore_path(self.old), ignore_errors=True)
-            log("dropped the previous copy %s" % self.old)
-        except Failed as exc:
-            self.warnings.append("previous copy %s not dropped: %s" % (self.old, exc))
 
     def stamp_source(self):
         self.step("stamp")
@@ -404,6 +351,20 @@ class Refresh:
                 self.warnings.append("after-hook %s: %s" % (command, exc))
                 log("after-hook failed: %s" % command)
 
+    def restart(self):
+        """--restart: start Odoo again with odoo-run --log, detached, if this run stopped it."""
+        if not (self.args.restart and self.was_running):
+            return
+        subprocess.Popen([str(self.odoo_run), "--log"], cwd=self.checkout, start_new_session=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(60):
+            if self.odoo_running():
+                self.status.update(restarted_odoo=True)
+                log("Odoo started again (odoo-run --log)")
+                return
+            time.sleep(1)
+        self.warnings.append("Odoo did not come back after --restart")
+
     # ---- driver ------------------------------------------------------------------------
 
     def execute(self):
@@ -422,44 +383,33 @@ class Refresh:
             if self.args.check:
                 self.status.update(result="checked", message="preflight only; nothing changed")
                 return
-            self.drop_new()
             self.download()
+            self.stop()
             self.filestore()
-            self.restore()
-            self.update()
+            errors = self.fresh_restore()
+            # The database is replaced now: neutralise it before judging the restore.
             self.neutralize()
-            self.sanity()
-            if self.args.rehearse:
-                raise Skip("rehearsed", "rehearsal complete up to the swap; %s was not touched" % self.db)
-            self.swap()
-            self.cleanup_old()
+            if len(errors) > self.allowed_errors:
+                raise Failed("odoo-fresh", "%d restore error line(s) (allowed %d); first: %s" % (
+                    len(errors), self.allowed_errors, errors[:3]))
             self.stamp_source()
             self.after_hooks()
             self.status.update(result="ok", message="%s now holds backup %s" % (self.db, self.status["backup_utc"]))
         except Skip as exc:
             self.status.update(result=exc.result, message=str(exc))
-            if not self.swapped:
-                self.cleanup_failed()
         except Failed as exc:
             self.status.update(result="failed", step=exc.step, message=str(exc))
             log("FAILED at %s: %s" % (exc.step, exc))
-            if not self.swapped:
-                self.cleanup_failed()
         except Exception as exc:  # unexpected: still record it, never leave the status at "running"
             self.status.update(result="failed", message="%s: %s" % (type(exc).__name__, exc))
             log("FAILED unexpectedly at %s: %s" % (self.status.get("step"), exc))
-            if not self.swapped:
-                self.cleanup_failed()
             raise
         finally:
-            lock.close()
-            self.finish()
-
-    def cleanup_failed(self):
-        try:
-            self.drop_new()
-        except Exception as exc:  # the live database is untouched; report and go on
-            self.warnings.append("could not drop %s: %s" % (self.new, exc))
+            try:
+                self.restart()
+            finally:
+                lock.close()
+                self.finish()
 
 
 def main():
@@ -469,8 +419,8 @@ def main():
     parser.add_argument("--force", action="store_true", help="restore even if this backup is already restored")
     parser.add_argument("--check", action="store_true",
                         help="preflight only: read the backup, lock and disk; change nothing")
-    parser.add_argument("--rehearse", action="store_true",
-                        help="run everything up to the checks, then drop the copy; never swap, never stop Odoo")
+    parser.add_argument("--restart", action="store_true",
+                        help="start the checkout's Odoo again (odoo-run --log) if this run stopped it")
     args = parser.parse_args()
     refresh = Refresh(tomllib.loads(path(args.config).read_text()), args)
     refresh.execute()
