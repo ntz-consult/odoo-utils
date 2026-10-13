@@ -5,7 +5,7 @@ It does three things and no other database work:
   1. fetch the newest daily backup over SSH and write its SQL to the project's .odoo/dump.sql;
   2. call the project's own `odoo-fresh` (drop, create, restore from .odoo/dump.sql);
   3. neutralise: the stock neutralize.sql of every installed module (what `odoo-bin neutralize`
-     runs), then the project SQL, whose checks must pass.
+     runs), then the project SQL, whose checks must pass, and set/check report.url via Odoo.
 After that it checks row counts and, only when everything passed, copies the filestore.
 
 Generic: every host, path and project detail comes from the TOML file given with --config.
@@ -25,6 +25,7 @@ is for runs Gerhard asks for.
     database = "ropeworx"                      # must equal database.name of the checkout's .odoo config
     checkout = "~/Work/ropeworx"               # Odoo checkout with .odoo/
     conf = ".odoo/odoo.conf"                   # relative to checkout; finds the running Odoo and the addons path
+    report_url = "http://127.0.0.1:8097"         # PDF assets bypass the public proxy's basic auth
     data_dir = "~/Work/ropeworx/.odoo/data"    # filestore lives in <data_dir>/filestore/<db>
     session = "ropeworx-main"                  # tmux session of the live Odoo (exact name), closed with it
     lock = "~/.cache/ropeworx-db-refresh.lock"
@@ -72,7 +73,7 @@ SSH_OPTIONS = ["-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "Connect
 CARRIED = ("restored_backup_utc", "filestore_copied", "row_counts")
 KEYS = {
     "source": {"ssh", "key", "dump", "filestore"},
-    "target": {"database", "checkout", "conf", "data_dir", "session", "lock", "state_dir", "data_source", "after"},
+    "target": {"database", "checkout", "conf", "report_url", "data_dir", "session", "lock", "state_dir", "data_source", "after"},
     "run": {"fresh", "filestore_days", "filestore_max_age_days", "min_free_gb", "min_backup_age_min",
             "max_backup_age_hours",
             "allowed_restore_errors", "min_ratio", "count_tables", "neutralize_sql"},
@@ -110,11 +111,11 @@ def path(value):
     return Path(os.path.expanduser(value))
 
 
-def run(command, step, cwd=None, env=None, log_file=None, shell=False):
+def run(command, step, cwd=None, env=None, log_file=None, shell=False, input_text=None):
     """Run a command and return its output. Raises Failed, with the output tail, on a non-zero exit."""
     handle = open(log_file, "w") if log_file else None
     try:
-        done = subprocess.run(command, cwd=cwd, env=env, shell=shell, text=True,
+        done = subprocess.run(command, cwd=cwd, env=env, shell=shell, text=True, input=input_text,
                               executable="/bin/bash" if shell else None,
                               stdout=handle or subprocess.PIPE,
                               stderr=subprocess.STDOUT if handle else subprocess.PIPE)
@@ -168,6 +169,17 @@ class Refresh:
         self.db = tgt["database"]
         self.checkout = path(tgt["checkout"])
         self.conf = self.checkout / tgt["conf"]
+        self.report_url = tgt["report_url"]
+        parser = configparser.RawConfigParser()
+        parser.read(self.conf)
+        expected = "http://127.0.0.1:%d" % parser.getint("options", "http_port")
+        if self.report_url != expected:
+            raise Failed("config", "report_url must match the local Odoo port: %s" % expected)
+        self.python = self.checkout / ".venv" / "bin" / "python"
+        self.odoo_bin = next((base.parent / "odoo-bin" for base in self.addons_paths()
+                              if (base.parent / "odoo-bin").is_file()), None)
+        if not self.python.is_file() or self.odoo_bin is None:
+            raise Failed("config", "project Python or odoo-bin not found for report.url")
         self.data_dir = path(tgt["data_dir"])
         self.session = tgt["session"]
         self.lock_file = path(tgt["lock"])
@@ -390,7 +402,28 @@ class Refresh:
         log("stock neutralise SQL of %d installed module(s) applied" % len(files))
         run(["psql", "-X", "-q", "-h", "localhost", "-U", "odoo", "-d", self.db, "-v", "ON_ERROR_STOP=1",
              "-f", str(self.neutralize_sql)], "neutralize", log_file=self.state / "neutralize-sql.log")
+        self.set_report_url()
         log("neutralised and checked (%s)" % self.neutralize_sql.name)
+
+    def set_report_url(self):
+        """Set and read back the PDF asset URL through Odoo, without starting HTTP or cron."""
+        script = """
+assert env.cr.dbname == %r
+assert odoo.tools.config['db_host'] in ('localhost', '127.0.0.1')
+params = env['ir.config_parameter'].sudo()
+params.set_param('report.url', %r)
+env.cr.commit()
+env.registry.signal_changes()
+assert params.search([('key', '=', 'report.url')]).value == %r
+print('report.url verified: ' + params.get_param('report.url'))
+""" % (self.db, self.report_url, self.report_url)
+        output = run([str(self.python), str(self.odoo_bin), "shell", "-c", str(self.conf),
+                      "-d", self.db, "--no-http", "--max-cron-threads=0", "--shell-interface=python"],
+                     "neutralize", cwd=self.checkout, log_file=self.state / "report-url.log", input_text=script)
+        marker = "report.url verified: " + self.report_url
+        if marker not in output.splitlines():
+            raise Failed("neutralize", "Odoo did not verify report.url")
+        log(marker)
 
     def sanity(self):
         """Row counts against the last good run. With no baseline yet, they are recorded only."""
