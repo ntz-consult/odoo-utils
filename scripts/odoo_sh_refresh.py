@@ -37,6 +37,7 @@ starts it again, but only after a fully good run.
     filestore_max_age_days = 7                 # ... and whenever the last copy is older than this
     min_free_gb = 10
     min_backup_age_min = 20                    # refuse a backup that is still being written
+    max_backup_age_hours = 36                  # a newer-than-this daily is required, else the run fails loudly
     allowed_restore_errors = 1                 # psql ERROR lines odoo-fresh may print
     min_ratio = 0.9                            # row counts must be this share of the last good run
     count_tables = ["account_move", "sale_order"]  # 'table|where' counts only matching rows
@@ -72,6 +73,7 @@ KEYS = {
     "source": {"ssh", "key", "dump", "filestore"},
     "target": {"database", "checkout", "conf", "data_dir", "session", "lock", "state_dir", "data_source", "after"},
     "run": {"fresh", "odoo_run", "filestore_days", "filestore_max_age_days", "min_free_gb", "min_backup_age_min",
+            "max_backup_age_hours",
             "allowed_restore_errors", "min_ratio", "count_tables", "neutralize_sql"},
 }
 OPTIONAL = {"after", "odoo_run", "filestore_max_age_days"}
@@ -176,6 +178,7 @@ class Refresh:
         self.filestore_max_age = dt.timedelta(days=rules.get("filestore_max_age_days", 7))
         self.min_free = rules["min_free_gb"] * 1024 ** 3
         self.min_age = dt.timedelta(minutes=rules["min_backup_age_min"])
+        self.max_age = dt.timedelta(hours=rules["max_backup_age_hours"])
         self.allowed_errors = rules["allowed_restore_errors"]
         self.min_ratio = rules["min_ratio"]
         self.count_tables = rules["count_tables"]
@@ -294,6 +297,10 @@ class Refresh:
         age = now() - backup
         if age < self.min_age:
             raise Failed("preflight", "newest backup is %s old; still being written" % age)
+        if age > self.max_age:
+            # Odoo.sh stopped writing dailies, or the source moved: never let this pass as a quiet skip.
+            raise Failed("preflight", "newest Odoo.sh backup is %s old (%s), limit %s; no new daily"
+                         % (age, backup.strftime("%Y-%m-%d %H:%M UTC"), self.max_age))
         free = shutil.disk_usage(self.data_dir).free
         if free < self.min_free:
             raise Failed("preflight", "only %.1f GB free" % (free / 1024 ** 3))
