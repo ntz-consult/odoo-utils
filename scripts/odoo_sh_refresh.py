@@ -10,8 +10,10 @@ After that it checks row counts and, only when everything passed, copies the fil
 
 Generic: every host, path and project detail comes from the TOML file given with --config.
 The run never triggers a backup on Odoo.sh. It stops the checkout's running Odoo before
-odoo-fresh (odoo-fresh cannot drop a database that is in use) and leaves it stopped. --restart
-starts it again, but only after a fully good run.
+odoo-fresh (odoo-fresh cannot drop a database that is in use) and leaves it stopped. It is never
+started again by this job (Gerhard, 2026-10-13: leave 8096 and 8097 stopped after the nightly refresh).
+A real run outside the night window (01:00-05:00 SAST) is refused unless --manual is given, which
+is for runs Gerhard asks for.
 
     [source]
     ssh = "user@project.odoo.com"              # SSH target of the Odoo.sh project
@@ -32,7 +34,6 @@ starts it again, but only after a fully good run.
 
     [run]
     fresh = "~/.local/share/odoo/bin/odoo-fresh"   # the global odoo-fresh
-    odoo_run = "~/.local/share/odoo/bin/odoo-run"  # used by --restart
     filestore_days = ["Sun"]                   # copy the filestore on these days (SAST) ...
     filestore_max_age_days = 7                 # ... and whenever the last copy is older than this
     min_free_gb = 10
@@ -44,7 +45,7 @@ starts it again, but only after a fully good run.
     neutralize_sql = "~/Work/sys-admin/bin/ropeworx-neutralize.sql"
 
 Steps: lock -> preflight -> download (dump.sql) -> stop Odoo -> odoo-fresh -> neutralise
--> row counts -> filestore -> data-source stamp -> after-hooks [-> restart Odoo].
+-> row counts -> filestore -> data-source stamp -> after-hooks.
 
 odoo-fresh replaces the database in place; there is no copy to fall back to. A run fails before
 odoo-fresh if anything other than the stopped Odoo is still connected to the database. A failure
@@ -72,11 +73,11 @@ CARRIED = ("restored_backup_utc", "filestore_copied", "row_counts")
 KEYS = {
     "source": {"ssh", "key", "dump", "filestore"},
     "target": {"database", "checkout", "conf", "data_dir", "session", "lock", "state_dir", "data_source", "after"},
-    "run": {"fresh", "odoo_run", "filestore_days", "filestore_max_age_days", "min_free_gb", "min_backup_age_min",
+    "run": {"fresh", "filestore_days", "filestore_max_age_days", "min_free_gb", "min_backup_age_min",
             "max_backup_age_hours",
             "allowed_restore_errors", "min_ratio", "count_tables", "neutralize_sql"},
 }
-OPTIONAL = {"after", "odoo_run", "filestore_max_age_days"}
+OPTIONAL = {"after", "filestore_max_age_days"}
 
 
 class Failed(Exception):
@@ -173,7 +174,6 @@ class Refresh:
         self.data_source = self.checkout / tgt["data_source"]
         self.after = tgt.get("after", [])
         self.fresh = path(rules["fresh"])
-        self.odoo_run = path(rules.get("odoo_run", "~/.local/share/odoo/bin/odoo-run"))
         self.days = rules["filestore_days"]
         self.filestore_max_age = dt.timedelta(days=rules.get("filestore_max_age_days", 7))
         self.min_free = rules["min_free_gb"] * 1024 ** 3
@@ -452,28 +452,16 @@ class Refresh:
                 self.warnings.append("after-hook %s: %s" % (command, exc))
                 log("after-hook failed: %s" % command)
 
-    def restart(self):
-        """--restart: start Odoo again with odoo-run --log, detached. Only after a good run."""
-        if not (self.args.restart and self.was_running and self.status["result"] == "ok"):
-            if self.args.restart and self.was_running:
-                log("Odoo NOT restarted: the run did not end ok")
-            return
-        subprocess.Popen([str(self.odoo_run), "--log"], cwd=self.checkout, start_new_session=True,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        for _ in range(60):
-            if self.odoo_running():
-                self.status.update(restarted_odoo=True)
-                log("Odoo started again (odoo-run --log)")
-                return
-            time.sleep(1)
-        self.warnings.append("Odoo did not come back after --restart")
-
     # ---- driver ------------------------------------------------------------------------
 
     def execute(self):
         lock = None
         try:
             self.configure()
+            hour = self.started.astimezone(SAST).hour
+            if not self.args.check and not self.args.manual and not (1 <= hour < 5):
+                raise Skip("skipped:daytime", "real runs are nightly only (01:00-05:00 SAST); this is %s SAST. "
+                                             "Use --manual only when Gerhard asks" % self.started.astimezone(SAST).strftime("%H:%M"))
             self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
             self.lock_file.parent.mkdir(parents=True, exist_ok=True)
             lock = open(self.lock_file, "a")
@@ -508,12 +496,9 @@ class Refresh:
         finally:
             if self.status["result"] == "failed" and self.replaced:
                 self.stamp_failed()
-            try:
-                self.restart()
-            finally:
-                if lock:
-                    lock.close()
-                self.finish()
+            if lock:
+                lock.close()
+            self.finish()
 
 
 def main():
@@ -523,8 +508,8 @@ def main():
     parser.add_argument("--force", action="store_true", help="restore even if this backup is already restored")
     parser.add_argument("--check", action="store_true",
                         help="preflight only: config, lock, backup and disk; change nothing")
-    parser.add_argument("--restart", action="store_true",
-                        help="start the checkout's Odoo again (odoo-run --log) after a good run if it stopped it")
+    parser.add_argument("--manual", action="store_true",
+                        help="allow a real run outside the night window; only when Gerhard asks for it")
     args = parser.parse_args()
     try:
         config = tomllib.loads(path(args.config).read_text())
