@@ -430,6 +430,9 @@ print('report.url verified: ' + params.get_param('report.url'))
         self.step("counts")
         counts = self.counts()
         baseline = self.status.get("row_counts") or {}
+        # Older refreshes stored [previous, restored] counts; the restored count is the baseline.
+        baseline = {t: value[-1] if isinstance(value, list) else value
+                    for t, value in baseline.items()}
         low = {t: (n, baseline[t]) for t, n in counts.items()
                if t in baseline and n < baseline[t] * self.min_ratio}
         self.status.update(row_counts_new=counts)
