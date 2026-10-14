@@ -6,7 +6,10 @@ It does three things and no other database work:
   2. call the project's own `odoo-fresh` (drop, create, restore from .odoo/dump.sql);
   3. neutralise: the stock neutralize.sql of every installed module (what `odoo-bin neutralize`
      runs), then the project SQL, whose checks must pass, and set/check report.url via Odoo.
-After that it checks row counts and, only when everything passed, copies the filestore.
+After that it checks row counts. The filestore is never copied by default (Gerhard, 2026-10-14:
+restores/refreshes never copy the filestore unless explicitly opted in). Opt in per run with
+--with-filestore, or per config with run.filestore = true; only then do filestore_days and
+filestore_max_age_days apply, and only after everything passed.
 
 Generic: every host, path and project detail comes from the TOML file given with --config.
 The run never triggers a backup on Odoo.sh. It stops the checkout's running Odoo before
@@ -35,7 +38,8 @@ is for runs Gerhard asks for.
 
     [run]
     fresh = "~/.local/share/odoo/bin/odoo-fresh"   # the global odoo-fresh
-    filestore_days = ["Sun"]                   # copy the filestore on these days (SAST) ...
+    filestore = false                          # opt-in; default false: never copy the filestore
+    filestore_days = ["Sun"]                   # only with filestore = true: copy on these days (SAST) ...
     filestore_max_age_days = 7                 # ... and whenever the last copy is older than this
     min_free_gb = 10
     min_backup_age_min = 20                    # refuse a backup that is still being written
@@ -74,11 +78,11 @@ CARRIED = ("restored_backup_utc", "filestore_copied", "row_counts")
 KEYS = {
     "source": {"ssh", "key", "dump", "filestore"},
     "target": {"database", "checkout", "conf", "report_url", "data_dir", "session", "lock", "state_dir", "data_source", "after"},
-    "run": {"fresh", "filestore_days", "filestore_max_age_days", "min_free_gb", "min_backup_age_min",
+    "run": {"fresh", "filestore", "filestore_days", "filestore_max_age_days", "min_free_gb", "min_backup_age_min",
             "max_backup_age_hours",
             "allowed_restore_errors", "min_ratio", "count_tables", "neutralize_sql"},
 }
-OPTIONAL = {"after", "filestore_max_age_days"}
+OPTIONAL = {"after", "filestore", "filestore_days", "filestore_max_age_days"}
 
 
 class Failed(Exception):
@@ -165,7 +169,7 @@ class Refresh:
         self.ssh_target = src["ssh"]
         self.key = path(src["key"])
         self.dump_remote = src["dump"]
-        self.filestore_remote = src["filestore"]
+        self.filestore_remote = src.get("filestore")
         self.db = tgt["database"]
         self.checkout = path(tgt["checkout"])
         self.conf = self.checkout / tgt["conf"]
@@ -186,7 +190,8 @@ class Refresh:
         self.data_source = self.checkout / tgt["data_source"]
         self.after = tgt.get("after", [])
         self.fresh = path(rules["fresh"])
-        self.days = rules["filestore_days"]
+        self.filestore_opt_in = rules.get("filestore", False) is True
+        self.days = rules.get("filestore_days", [])
         self.filestore_max_age = dt.timedelta(days=rules.get("filestore_max_age_days", 7))
         self.min_free = rules["min_free_gb"] * 1024 ** 3
         self.min_age = dt.timedelta(minutes=rules["min_backup_age_min"])
@@ -445,12 +450,21 @@ print('report.url verified: ' + params.get_param('report.url'))
         log("row counts ok: %s" % counts)
 
     def filestore(self):
-        """Only after a good restore. On its days, with --filestore, or when the last copy is too old."""
+        """Only after a good restore, and never by default (explicit opt-in only).
+
+        --with-filestore copies tonight. run.filestore = true enables the scheduled copy on
+        filestore_days or when the last copy is older than filestore_max_age_days."""
         self.step("filestore")
         today = dt.datetime.now(SAST)
         last = self.status.get("filestore_copied")
+        forced = getattr(self.args, "with_filestore", False)
+        if not (forced or self.filestore_opt_in):
+            log("filestore skipped (not opted in; use --with-filestore or run.filestore = true)")
+            return
+        if not self.filestore_remote:
+            raise Failed("filestore", "filestore opted in but [source] filestore is not set")
         stale = not last or today.date() - dt.date.fromisoformat(last) >= self.filestore_max_age
-        if not (self.args.filestore or today.strftime("%a") in self.days or stale):
+        if not (forced or today.strftime("%a") in self.days or stale):
             log("filestore kept (copied %s)" % last)
             return
         target = self.data_dir / "filestore" / self.db
@@ -540,7 +554,8 @@ print('report.url verified: ' + params.get_param('report.url'))
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True, help="TOML file with the source, target and run settings")
-    parser.add_argument("--filestore", action="store_true", help="copy the filestore tonight, not only on its days")
+    parser.add_argument("--with-filestore", "--filestore", dest="with_filestore", action="store_true",
+                        help="explicit opt-in: copy the filestore on this run (never copied by default)")
     parser.add_argument("--force", action="store_true", help="restore even if this backup is already restored")
     parser.add_argument("--check", action="store_true",
                         help="preflight only: config, lock, backup and disk; change nothing")
