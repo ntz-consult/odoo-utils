@@ -89,6 +89,10 @@ if ! [[ "$RUN_HTTP_PORT" =~ ^[0-9]+$ ]]; then
 fi
 odoo_enforce_port_pool "$RUN_HTTP_PORT" "$RUN_GEVENT_PORT" || exit 1
 
+# Worktrees use the primary checkout's filestore through a symlink (never a copy); check/repair it.
+source "$SCRIPT_DIR/filestore_link.sh"
+odoo_link_main_filestore "$PROJECT_ROOT" || echo "Warning: could not link the primary filestore; images/assets may break." >&2
+
 LOG_FILE="${LOG_FILE:-$ENV_DIR/${DB_NAME}.log}"
 
 if [ "$USE_LOGFILE" = "true" ]; then

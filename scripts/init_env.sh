@@ -71,6 +71,9 @@ if [[ "$WORKTREE" == true ]]; then
             || echo "Warning: could not link the agent rules into $PROJECT_ROOT; run: $LINKER $PROJECT_ROOT" >&2
         [[ -e "$PROJECT_ROOT/CLAUDE.md" || ! -e "$PROJECT_ROOT/AGENTS.md" ]] || ln -s AGENTS.md "$PROJECT_ROOT/CLAUDE.md"
     fi
+    # Share the primary checkout's filestore by symlink; never copy it.
+    "$SCRIPT_DIR/filestore_link.sh" "$PROJECT_ROOT" \
+        || echo "Warning: could not link the primary filestore; run: $SCRIPT_DIR/filestore_link.sh $PROJECT_ROOT" >&2
     echo "Created explicit worktree allocation: $WORKTREE_FILE"
     exit 0
 fi

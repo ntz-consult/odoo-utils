@@ -161,6 +161,67 @@ class WorktreeRemoveTests(unittest.TestCase):
         self.assertIn("explicit", self.calls())
         self.assertNotIn("hook-ran", self.calls())
 
+    def share_main_filestore(self):
+        """Link the worktree's filestore to the primary one, as filestore_link.sh does."""
+        main_data = self.main / ".odoo" / "data"
+        with open(self.main / ".odoo" / "config.toml", "a") as fh:
+            fh.write('\n[odoo]\ndata_dir = "%s"\n' % main_data)
+        with open(self.wt / ".odoo" / "worktree.toml", "a") as fh:
+            fh.write('\n[odoo]\ndata_dir = "%s"\n' % (self.wt / ".odoo" / "data"))
+        (self.wt / ".odoo" / "data" / "filestore" / "demo_feature").rmdir()
+        done = subprocess.run(["bash", str(SCRIPTS / "filestore_link.sh"), str(self.wt)],
+                              capture_output=True, text=True, env=self.env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        main_fs = main_data / "filestore" / "demo"
+        (main_fs / "ab").mkdir(parents=True, exist_ok=True)
+        (main_fs / "ab" / "logo").write_text("main logo")
+        link = self.wt / ".odoo" / "data" / "filestore" / "demo_feature"
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(os.readlink(link), str(main_fs))
+        return main_fs, link
+
+    def test_filestore_link_is_idempotent_and_keeps_copies(self):
+        main_fs, link = self.share_main_filestore()
+        again = subprocess.run(["bash", str(SCRIPTS / "filestore_link.sh"), str(self.wt)],
+                               capture_output=True, text=True, env=self.env)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(os.readlink(link), str(main_fs))
+        link.unlink()
+        link.mkdir()
+        (link / "copied").write_text("x")
+        fixed = subprocess.run(["bash", str(SCRIPTS / "filestore_link.sh"), str(self.wt)],
+                               capture_output=True, text=True, env=self.env)
+        self.assertEqual(fixed.returncode, 0, fixed.stderr)
+        self.assertTrue(link.is_symlink())
+        baks = list(link.parent.glob("demo_feature.bak-*"))
+        self.assertEqual(len(baks), 1)
+        self.assertEqual((baks[0] / "copied").read_text(), "x")
+
+    def test_remove_unlinks_shared_filestore_but_never_deletes_main(self):
+        main_fs, link = self.share_main_filestore()
+        done = self.remove("--yes", str(self.wt))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertFalse(self.wt.exists())
+        self.assertIn("primary filestore untouched", done.stdout)
+        self.assertEqual((main_fs / "ab" / "logo").read_text(), "main logo")
+
+    def test_remove_refuses_real_filestore_inside_primary_checkout(self):
+        main_fs, link = self.share_main_filestore()
+        # The worktree's data dir aliases the primary one: its filestore dir is a real directory
+        # inside the primary checkout and must never be rm -rf'd.
+        wt_data = self.wt / ".odoo" / "data"
+        link.unlink()
+        wt_data.joinpath("filestore").rmdir()
+        wt_data.rmdir()
+        wt_data.symlink_to(self.main / ".odoo" / "data")
+        (main_fs.parent / "demo_feature").mkdir()
+        (main_fs.parent / "demo_feature" / "keep").write_text("k")
+        done = self.remove("--yes", "--force", str(self.wt))
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("primary checkout's filestore", done.stderr)
+        self.assertEqual((main_fs / "ab" / "logo").read_text(), "main logo")
+        self.assertTrue((main_fs.parent / "demo_feature" / "keep").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

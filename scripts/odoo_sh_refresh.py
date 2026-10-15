@@ -468,6 +468,9 @@ print('report.url verified: ' + params.get_param('report.url'))
             log("filestore kept (copied %s)" % last)
             return
         target = self.data_dir / "filestore" / self.db
+        if target.is_symlink():
+            log("filestore skipped (%s is a link to a shared filestore; never copy into it)" % target)
+            return
         target.mkdir(parents=True, exist_ok=True)
         self.rsync("%s:%s/" % (self.ssh_target, self.filestore_remote), "%s/" % target, "filestore",
                    extra=["--delete"])

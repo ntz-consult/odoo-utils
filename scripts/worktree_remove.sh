@@ -135,12 +135,27 @@ if [[ -n "$DB" ]]; then
     PGPASSWORD="$PASSWORD" dropdb "${PG_ARGS[@]}" --if-exists --force "$DB"
 fi
 
-# A filestore outside the worktree folder is removed on its own; inside, it goes with the folder.
+# The worktree's filestore is normally a symlink to the primary checkout's filestore: remove only
+# the link, NEVER what it points to. A real directory is removed only when it is not (and does not
+# resolve to) the primary filestore.
 FILESTORE="$DATA_DIR/filestore/$DB"
-if [[ -n "$DB" && -d "$FILESTORE" && "$(cd "$FILESTORE" && pwd -P)" != "$ROOT"/* ]]; then
-    echo "Removing filestore $FILESTORE"
-    rm -rf -- "$FILESTORE"
+MAIN_DATA_DIR="$(read_key "$MAIN_CONFIG" odoo.data_dir)"; MAIN_DATA_DIR="${MAIN_DATA_DIR:-$MAIN/.odoo/odoo-data}"
+MAIN_FILESTORE="$MAIN_DATA_DIR/filestore/${MAIN_DB:-$(basename "$MAIN")}"
+if [[ -n "$DB" && -L "$FILESTORE" ]]; then
+    echo "Removing filestore link $FILESTORE (primary filestore untouched)"
+    rm -f -- "$FILESTORE"
+elif [[ -n "$DB" && -d "$FILESTORE" ]]; then
+    REAL_FS="$(cd "$FILESTORE" && pwd -P)"
+    if [[ -e "$MAIN_FILESTORE" && "$REAL_FS" -ef "$MAIN_FILESTORE" ]] || [[ "$REAL_FS" == "$MAIN"/* ]]; then
+        die "refusing: $FILESTORE resolves to the primary checkout's filestore"
+    fi
+    if [[ "$REAL_FS" != "$ROOT"/* ]]; then
+        echo "Removing filestore $FILESTORE"
+        rm -rf -- "$FILESTORE"
+    fi
 fi
+# Unlink any filestore symlinks inside the folder first so nothing below can follow them.
+[[ -d "$ROOT/.odoo" ]] && find "$ROOT/.odoo" -type l -delete 2>/dev/null || true
 
 echo "Removing worktree $ROOT"
 # Ignored runtime files (.odoo/data, secrets, logs) go with the folder.
