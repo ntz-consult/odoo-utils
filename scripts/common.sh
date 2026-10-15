@@ -4,8 +4,9 @@
 set -euo pipefail
 
 ODOO_MANAGED_CONF_KEYS=(
-    addons_path bin_path data_dir db_host db_name db_password db_port db_user
-    gevent_port http_interface http_port list_db log_level proxy_mode
+    addons_path bin_path data_dir db_host db_maxconn db_name db_password db_port db_user
+    gevent_port http_interface http_port list_db log_level max_cron_threads proxy_mode
+    workers
 )
 
 odoo_help_requested() {
@@ -166,6 +167,10 @@ odoo_render_conf() {
         printf 'proxy_mode = %s\n' "$ODOO_PROXY_MODE"
         printf 'log_level = %s\n' "$ODOO_LOG_LEVEL"
         printf 'bin_path = %s\n' "$BIN_PATH"
+        # Gerhard 2026-10-14 low-resource defaults for box/dev checkouts.
+        printf 'workers = 0\n'
+        printf 'max_cron_threads = 0\n'
+        printf 'db_maxconn = 8\n'
     } > "$temp_conf"
     if ! odoo_append_local_conf "$temp_conf"; then
         rm -f -- "$temp_conf"

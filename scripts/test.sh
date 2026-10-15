@@ -439,6 +439,7 @@ resolve_test_ports() {
         --gevent-port "$gevent_port"
         --workers 0
         --max-cron-threads 0
+        --db_maxconn 8
     )
 }
 
