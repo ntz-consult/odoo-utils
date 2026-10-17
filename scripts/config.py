@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -103,17 +105,112 @@ def shell_exports(config: dict[str, Any]) -> str:
     return "\n".join(lines) + ("\n" if lines else "")
 
 
+def primary_worktree(root: Path) -> Path | None:
+    """The first checkout Git reports. That is the primary worktree."""
+    try:
+        output = subprocess.check_output(
+            ["git", "-C", str(root), "worktree", "list", "--porcelain"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    for line in output.splitlines():
+        if line.startswith("worktree "):
+            return Path(line[len("worktree "):])
+    return None
+
+
+def uses_shared_odoo(root: Path) -> bool:
+    """True when this linked worktree's .odoo is a symlink to the primary checkout's .odoo."""
+    odoo = root / ".odoo"
+    if not odoo.is_symlink():
+        return False
+    primary = primary_worktree(root)
+    if primary is None:
+        return False
+    try:
+        if root.resolve() == primary.resolve():
+            return False
+        return odoo.resolve() == (primary / ".odoo").resolve()
+    except OSError:
+        return False
+
+
+def shared_worktree_database(root: Path) -> str | None:
+    """Database for a worktree that shares the primary .odoo.
+
+    The folder ``<primary>-<slug>`` uses ``<primary>_<slug>``, with every run of
+    non-letters folded into one underscore. The same spelling is what
+    ``tools/create_worktree.py`` clones. A folder whose name does not follow that
+    pattern has no private database name.
+    """
+    if not uses_shared_odoo(root):
+        return None
+    primary = primary_worktree(root)
+    if primary is None:
+        return None
+    prefix = primary.resolve().name + "-"
+    folder = root.resolve().name
+    if not folder.startswith(prefix):
+        return None
+    slug = folder[len(prefix):]
+    normalized = re.sub(r"[^a-z0-9]+", "_", slug.lower()).strip("_")
+    if not normalized:
+        return None
+    database = f"{primary.resolve().name}_{normalized}"
+    if len(database) > 63:
+        return None
+    return database
+
+
+def apply_shared_worktree_database(config: dict[str, Any], root: Path) -> dict[str, Any]:
+    """Select the worktree's own database when .odoo is the primary folder."""
+    database = shared_worktree_database(root)
+    if not database:
+        return config
+    merged = deep_merge(config, {"database": {"name": database}})
+    local = (merged.get("targets") or {}).get("local")
+    if isinstance(local, dict):
+        local["database"] = database
+    return merged
+
+
 def main(argv: list[str]) -> int:
+    if len(argv) >= 3 and argv[1] == "uses-shared-odoo":
+        return 0 if uses_shared_odoo(Path(argv[2])) else 1
+    if len(argv) >= 3 and argv[1] == "shared-db":
+        root = Path(argv[2])
+        if not uses_shared_odoo(root):
+            return 0
+        database = shared_worktree_database(root)
+        if not database:
+            print(
+                f"Error: {root} points .odoo at the primary checkout, but its folder "
+                "name does not name a private database.",
+                file=sys.stderr,
+            )
+            return 1
+        print(database)
+        return 0
     if len(argv) < 3 or argv[1] not in {"shell", "json"}:
         print(
-            "Error: usage: config.py shell|json CONFIG [WORKTREE_OVERRIDE]",
+            "Error: usage: config.py shell|json CONFIG [WORKTREE_OVERRIDE] [ROOT]",
             file=sys.stderr,
         )
         return 1
     command, config_path = argv[1], Path(argv[2])
     override = Path(argv[3]) if len(argv) > 3 else None
+    root = Path(argv[4]) if len(argv) > 4 else None
     try:
         config = load_merged_config(config_path, override)
+        if root is not None and uses_shared_odoo(root) and shared_worktree_database(root) is None:
+            fail_config(
+                f"{root} points .odoo at the primary checkout, but its folder "
+                "name does not name a private database."
+            )
+        if root is not None:
+            config = apply_shared_worktree_database(config, root)
     except ConfigError as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
@@ -121,7 +218,10 @@ def main(argv: list[str]) -> int:
         json.dump(config, sys.stdout, default=str)
         sys.stdout.write("\n")
         return 0
-    sys.stdout.write(shell_exports(config))
+    text = shell_exports(config)
+    if root is not None and uses_shared_odoo(root):
+        text += "export ODOO_SHARED_DATABASE=1\n"
+    sys.stdout.write(text)
     return 0
 
 

@@ -1,5 +1,19 @@
 # Odoo global commands
 
+## Interaction and instruction portability
+
+These owner instructions apply to every coding agent, regardless of provider or interface. Preserve the project's safety and approval rules.
+
+- Keep `AGENTS.md` as the canonical instruction file. `CLAUDE.md` is only a compatibility symlink to `AGENTS.md`; never keep separate rules there.
+- Keep shared policies, skills, and workflows agent agnostic. Provider-specific launchers and configuration are adapters, not separate sources of behavioral rules. Do not require a named provider for ordinary work or review.
+- Ask one question at a time, using the existing question-count convention when applicable.
+- Put every answer option in its own paragraph, beginning with a bold letter label such as **A.**, **B.**, **C.**, or **D.**
+- Leave a blank line between options. Never combine several options into one paragraph or put the question in a code block.
+- Mark one recommended option when a recommendation is useful. Use short, plain explanations.
+
+These instructions supersede older option-formatting examples and agent-specific wording. Read the shared `one-question-at-a-time` skill when available.
+
+
 Every `odoo-*` command resolves the current Git repository root and reads its
 shared runtime from `.odoo/`:
 
@@ -10,6 +24,14 @@ shared runtime from `.odoo/`:
 .odoo/dump.sql       ignored source used by odoo-fresh
 .odoo/odoo.conf      ignored generated Odoo server configuration
 ```
+
+When a `port-tool` command is installed, `odoo-run` records its HTTP port (and
+the gevent port when workers are requested) in that shared reservation register
+under the owner `odoo-<database>` before starting, and refuses to start if another
+owner holds the port. `odoo-test` records each test pair under
+`odoo-test-<database>` and releases it when the run ends. Set `ODOO_PORT_TOOL`
+to another executable to override the command, or to `none` in test suites that
+must not consult host sockets. Without the command nothing is recorded.
 
 Run `odoo-init-env` to create a new runtime. A linked worktree must receive an
 explicit allocation:
@@ -99,12 +121,20 @@ to `odoo.conf` as `gevent_port`. When a register exists:
   (`~/.cache/odoo-utils/ports.lock`, override `ODOO_PORTS_LOCK`), so two worktrees
   can never be given the same port.
 
-A linked worktree (`git worktree add`) has its own `worktree.toml` or it does not
-run. Its committed `config.toml` carries the primary checkout's ports, so
-`odoo-run`, `odoo-test` and `odoo-init-env` (without `--worktree`) refuse a linked
-worktree without `[ports] http` in its `worktree.toml`, and name the fix:
-`odoo-init-env --worktree --db NAME`. A linked worktree claims only its own
-`worktree.toml` ports. The primary checkout keeps its fixed ports.
+A linked worktree (`git worktree add`) with its own `.odoo` directory has its own
+`worktree.toml` or it does not run. Its committed `config.toml` carries the primary
+checkout's ports, so `odoo-run`, `odoo-test` and `odoo-init-env` (without
+`--worktree`) refuse that worktree without `[ports] http` in its `worktree.toml`,
+and name the fix: `odoo-init-env --worktree --db NAME`. That worktree claims only
+its own `worktree.toml` ports. The primary checkout keeps its fixed ports.
+
+A worktree whose `.odoo` is a symlink to the primary checkout's `.odoo` uses that
+folder and the primary ports. Its database name comes from the directory name
+(`ibcorr-ticket-00017` uses `ibcorr_ticket_00017`). The generated `odoo.conf` for
+that database is written under `~/.cache/odoo-utils/conf/`, so starting the worktree
+does not rewrite the primary `odoo.conf`. `odoo-init-env --worktree` sets up this
+link for the `ibcorr` project. `PROJECT_RULES.md` in a new worktree is a symlink to
+the primary checkout's file.
 
 ```bash
 ports.py show                      # pools, clashes, configs outside their pool

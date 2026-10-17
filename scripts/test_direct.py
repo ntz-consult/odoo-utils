@@ -38,6 +38,25 @@ def config():
 
 
 class DirectCliTests(unittest.TestCase):
+    def test_shared_local_database_uses_its_own_key(self):
+        value = config()
+        value['targets']['local'] = {'odoo_version': 19, 'url': 'http://localhost:8096',
+                                     'database': 'ibcorr_ticket_17', 'tags': ['develop']}
+        with patch.dict(os.environ, {'ODOO_SHARED_DATABASE': '1',
+                                    'ODOO_DIRECT_LOCAL_API_KEY': 'wrong-primary-key',
+                                    'ODOO_DIRECT_LOCAL_IBCORR_TICKET_17_API_KEY': 'worktree-key'}, clear=True):
+            client, target, _ = CLI.target_client(value, 'local')
+        self.assertEqual(target['api_key'], 'worktree-key')
+
+    def test_shared_local_database_does_not_fall_back_to_primary_key(self):
+        value = config()
+        value['targets']['local'] = {'odoo_version': 19, 'url': 'http://localhost:8096',
+                                     'database': 'ibcorr_ticket_17', 'tags': ['develop']}
+        with patch.dict(os.environ, {'ODOO_SHARED_DATABASE': '1',
+                                    'ODOO_DIRECT_LOCAL_API_KEY': 'wrong-primary-key'}, clear=True):
+            with self.assertRaisesRegex(CLI.TargetError, 'LOCAL_IBCORR_TICKET_17_API_KEY'):
+                CLI.target_client(value, 'local')
+
     def test_derived_secret_name(self):
         with patch.dict(os.environ, {"ODOO_DIRECT_UPGRADE_19_API_KEY": "key"}, clear=True):
             client, target, label = CLI.target_client(config(), "upgrade-19")

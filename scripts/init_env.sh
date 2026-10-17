@@ -48,25 +48,79 @@ fi
 mkdir -p "$ODOO_DIR"
 
 if [[ "$WORKTREE" == true ]]; then
-    [[ -f "$CONFIG_FILE" ]] || { echo "Error: missing $CONFIG_FILE." >&2; exit 1; }
+    [[ -f "$CONFIG_FILE" || -L "$ODOO_DIR" ]] || { echo "Error: missing $CONFIG_FILE." >&2; exit 1; }
+    MAIN_WORKTREE="$(git worktree list --porcelain | awk '/^worktree / {print substr($0, 10); exit}')"
+    POOL_PROJECT="$(python3 "$SCRIPT_DIR/config.py" json "$MAIN_WORKTREE/.odoo/config.toml" | python3 -c 'import json,sys; print((json.load(sys.stdin).get("project") or {}).get("name") or "")')"
+    POOL_PROJECT="${POOL_PROJECT:-$(basename "$MAIN_WORKTREE")}"
+    # IBCorr worktrees use the primary checkout's .odoo. The database name comes from the
+    # folder. Other projects still get a private worktree.toml and their own ports.
+    if [[ "$POOL_PROJECT" == "ibcorr" || -L "$ODOO_DIR" ]]; then
+        [[ "$MAIN_WORKTREE" != "$PROJECT_ROOT" ]] || { echo "Error: --worktree is for a linked worktree." >&2; exit 1; }
+        if [[ -d "$ODOO_DIR" && ! -L "$ODOO_DIR" ]]; then
+            extras="$(find "$ODOO_DIR" -mindepth 1 ! -name config.toml -print -quit)"
+            if [[ -n "$extras" ]]; then
+                echo "Error: $ODOO_DIR has local files besides config.toml ($extras)." >&2
+                echo "Refusing to replace that folder. It must be a symlink to $MAIN_WORKTREE/.odoo." >&2
+                exit 1
+            fi
+            git -C "$PROJECT_ROOT" update-index --skip-worktree .odoo/config.toml
+            rm -rf "$ODOO_DIR"
+        fi
+        if [[ ! -e "$ODOO_DIR" ]]; then
+            ln -s "$MAIN_WORKTREE/.odoo" "$ODOO_DIR"
+        elif [[ -L "$ODOO_DIR" ]]; then
+            [[ "$(readlink -f "$ODOO_DIR")" == "$(readlink -f "$MAIN_WORKTREE/.odoo")" ]] \
+                || { echo "Error: $ODOO_DIR does not point at $MAIN_WORKTREE/.odoo." >&2; exit 1; }
+        else
+            echo "Error: $ODOO_DIR is not a symlink to $MAIN_WORKTREE/.odoo." >&2
+            exit 1
+        fi
+        git -C "$PROJECT_ROOT" update-index --skip-worktree .odoo/config.toml || true
+        if [[ -n "$WORKTREE_DB" ]]; then
+            derived="$(python3 "$SCRIPT_DIR/config.py" shared-db "$PROJECT_ROOT")" || exit 1
+            [[ "$WORKTREE_DB" == "$derived" ]] \
+                || { echo "Error: this folder's database is $derived. Refusing --db $WORKTREE_DB." >&2; exit 1; }
+        fi
+        python3 "$SCRIPT_DIR/config.py" shared-db "$PROJECT_ROOT" >/dev/null || exit 1
+        EXCLUDE_FILE="$(git rev-parse --git-path info/exclude)"
+        grep -Fxq '/.odoo' "$EXCLUDE_FILE" 2>/dev/null || printf '%s\n' '/.odoo' >> "$EXCLUDE_FILE"
+        if [[ -f "$MAIN_WORKTREE/PROJECT_RULES.md" ]]; then
+            if [[ -e "$PROJECT_ROOT/PROJECT_RULES.md" && ! -L "$PROJECT_ROOT/PROJECT_RULES.md" ]]; then
+                rm -f "$PROJECT_ROOT/PROJECT_RULES.md"
+            fi
+            if [[ ! -L "$PROJECT_ROOT/PROJECT_RULES.md" ]]; then
+                ln -s "$MAIN_WORKTREE/PROJECT_RULES.md" "$PROJECT_ROOT/PROJECT_RULES.md"
+            fi
+        fi
+        LINKER="$MAIN_WORKTREE/.odoo-sh-rules/scripts/link-repository"
+        if [[ -x "$LINKER" ]]; then
+            "$LINKER" "$PROJECT_ROOT" >/dev/null \
+                || echo "Warning: could not link the agent rules into $PROJECT_ROOT; run: $LINKER $PROJECT_ROOT" >&2
+            [[ -e "$PROJECT_ROOT/CLAUDE.md" || ! -e "$PROJECT_ROOT/AGENTS.md" ]] || ln -s AGENTS.md "$PROJECT_ROOT/CLAUDE.md"
+        fi
+        "$SCRIPT_DIR/filestore_link.sh" "$PROJECT_ROOT" \
+            || echo "Warning: could not link the primary filestore; run: $SCRIPT_DIR/filestore_link.sh $PROJECT_ROOT" >&2
+        echo "Worktree .odoo points at $MAIN_WORKTREE/.odoo"
+        exit 0
+    fi
     [[ -n "$WORKTREE_DB" ]] || { echo "Error: --worktree requires --db." >&2; exit 1; }
     # The project name selects the pool. assign takes the first free slot (or checks the given
     # one), refuses anything another checkout claims, and writes worktree.toml under the lock.
-    POOL_PROJECT="$(python3 "$SCRIPT_DIR/config.py" json "$CONFIG_FILE" | python3 -c 'import json,sys; print((json.load(sys.stdin).get("project") or {}).get("name") or "")')"
-    POOL_PROJECT="${POOL_PROJECT:-$(basename "$PROJECT_ROOT")}"
     ASSIGN_ARGS=(assign "$POOL_PROJECT" --root "$PROJECT_ROOT" --db "$WORKTREE_DB")
     if [[ -n "$WORKTREE_HTTP" ]]; then ASSIGN_ARGS+=(--http "$WORKTREE_HTTP"); fi
     if [[ -n "$WORKTREE_TEST" ]]; then ASSIGN_ARGS+=(--test-start "$WORKTREE_TEST"); fi
     python3 "$PORTS_PY" "${ASSIGN_ARGS[@]}" >/dev/null || exit 1
-    MAIN_WORKTREE="$(git worktree list --porcelain | awk '/^worktree / {print substr($0, 10); exit}')"
     if [[ "$MAIN_WORKTREE" != "$PROJECT_ROOT" && -f "$MAIN_WORKTREE/.odoo/secrets.env" ]]; then
         ln -sfn "$MAIN_WORKTREE/.odoo/secrets.env" "$SECRETS_FILE"
     fi
     # The agent-rules overlay (AGENTS.md, PROJECT_RULES.md, .odoo-sh-rules) is untracked and
     # ignored, so `git worktree add` does not bring it. Install it from the primary checkout.
+    # PROJECT_RULES.md is a symlink to the primary file. The worktree does not get a copy.
     LINKER="$MAIN_WORKTREE/.odoo-sh-rules/scripts/link-repository"
     if [[ "$MAIN_WORKTREE" != "$PROJECT_ROOT" && -x "$LINKER" && -f "$MAIN_WORKTREE/PROJECT_RULES.md" ]]; then
-        [[ -e "$PROJECT_ROOT/PROJECT_RULES.md" ]] || cp -p "$MAIN_WORKTREE/PROJECT_RULES.md" "$PROJECT_ROOT/PROJECT_RULES.md"
+        if [[ ! -e "$PROJECT_ROOT/PROJECT_RULES.md" ]]; then
+            ln -s "$MAIN_WORKTREE/PROJECT_RULES.md" "$PROJECT_ROOT/PROJECT_RULES.md"
+        fi
         "$LINKER" "$PROJECT_ROOT" >/dev/null \
             || echo "Warning: could not link the agent rules into $PROJECT_ROOT; run: $LINKER $PROJECT_ROOT" >&2
         [[ -e "$PROJECT_ROOT/CLAUDE.md" || ! -e "$PROJECT_ROOT/AGENTS.md" ]] || ln -s AGENTS.md "$PROJECT_ROOT/CLAUDE.md"

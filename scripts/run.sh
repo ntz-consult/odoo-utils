@@ -89,11 +89,23 @@ if ! [[ "$RUN_HTTP_PORT" =~ ^[0-9]+$ ]]; then
 fi
 odoo_enforce_port_pool "$RUN_HTTP_PORT" "$RUN_GEVENT_PORT" || exit 1
 
+# Record the ports Odoo will bind in the shared reservation register. The gevent
+# port is bound only with workers > 0, so it is recorded only when workers are requested.
+RESERVE_PORTS=("$RUN_HTTP_PORT")
+for ((i = 0; i < ${#ODOO_ARGS[@]}; i++)); do
+    case "${ODOO_ARGS[$i]}" in
+        --workers) [[ "${ODOO_ARGS[$((i + 1))]:-0}" != 0 && -n "$RUN_GEVENT_PORT" ]] && RESERVE_PORTS+=("$RUN_GEVENT_PORT") ;;
+        --workers=*) [[ "${ODOO_ARGS[$i]#*=}" != 0 && -n "$RUN_GEVENT_PORT" ]] && RESERVE_PORTS+=("$RUN_GEVENT_PORT") ;;
+    esac
+done
+odoo_reserve_ports "Odoo server for ${DB_NAME} (odoo-run)" "${ODOO_PORT_OWNER:-odoo-${DB_NAME}}" "${RESERVE_PORTS[@]}" || exit 1
+
 # Worktrees use the primary checkout's filestore through a symlink (never a copy); check/repair it.
 source "$SCRIPT_DIR/filestore_link.sh"
 odoo_link_main_filestore "$PROJECT_ROOT" || echo "Warning: could not link the primary filestore; images/assets may break." >&2
 
 LOG_FILE="${LOG_FILE:-$ENV_DIR/${DB_NAME}.log}"
+echo "Test URL (give Gerhard this, never a local port): http://solomon:${RUN_HTTP_PORT} (fallback http://100.105.180.75:${RUN_HTTP_PORT}); stop it when done" >&2
 
 if [ "$USE_LOGFILE" = "true" ]; then
     rm -f "$LOG_FILE"

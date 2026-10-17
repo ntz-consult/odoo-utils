@@ -36,9 +36,14 @@ Commands:
     ports.py active                       register path; exit 3 when none is in use
     ports.py hook PROJECT                 the pool's remove_hook (odoo-worktree-remove)
 
-Linked worktrees (git worktree add) never inherit the primary checkout's ports: the
-committed config.toml carries the primary's ports, so a linked worktree claims and uses
-only the ports in its own worktree.toml. The primary checkout keeps its fixed ports.
+A linked worktree with its own .odoo directory never inherits the primary checkout's
+ports: the committed config.toml carries the primary's ports, so that worktree claims
+and uses only the ports in its own worktree.toml. The primary checkout keeps its fixed
+ports.
+
+A linked worktree whose .odoo is a symlink to the primary checkout's .odoo uses that
+one folder and the primary ports. Its PostgreSQL database name comes from the folder
+name (ibcorr-ticket-00017 uses ibcorr_ticket_00017). It has no worktree.toml of its own.
 
 Ports are never reserved: a worktree's ports are free as soon as its folder (with
 its .odoo configuration) is gone and nothing listens on them.
@@ -47,6 +52,7 @@ its .odoo configuration) is gone and nothing listens on them.
 from __future__ import annotations
 
 import argparse
+import config
 import contextlib
 import fcntl
 import glob
@@ -383,12 +389,17 @@ def check(register: Register, project: str, root: Path, http: int, gevent: int |
                             % (test[0], test[1], project, pool.describe()))
     owners = claims(register, [root]) if owners is None else owners
     me = root.resolve()
+    shared_primary = None
+    if config.uses_shared_odoo(root):
+        primary = primary_checkout(root)
+        shared_primary = primary.resolve() if primary is not None else None
     mine = {http} | ({gevent} if gevent else set())
     if test is not None:
         mine |= set(range(test[0], test[1] + 1))
     for port in sorted(mine):
         others = [str(owner) for owner, other in owners.get(port, ())
-                  if owner != me and legitimate(register, port, other)]
+                  if owner != me and owner.resolve() != shared_primary
+                  and legitimate(register, port, other)]
         if others:
             problems.append(f"port {port} is also assigned to {', '.join(others)}")
     return problems
@@ -426,6 +437,11 @@ def worktree_problems(root: Path, gevent_offset: int = 500) -> list[str]:
     """Why a linked worktree may not start Odoo; empty for the primary checkout or a valid worktree."""
     if not is_linked_worktree(root):
         return []
+    if config.uses_shared_odoo(root):
+        if config.shared_worktree_database(root):
+            return []
+        return [f"linked worktree {root} points .odoo at the primary checkout, but its folder "
+                "name does not name a private database"]
     values = _load_toml(root / ".odoo" / "worktree.toml").get("ports") or {}
     if not isinstance(values.get("http"), int):
         return [f"linked worktree {root} has no ports of its own (.odoo/worktree.toml has no "
@@ -501,6 +517,11 @@ def assign(register: Register | None, project: str, root: Path, database: str,
     """
     if not database:
         raise PortError("a database name is required")
+    if (root / ".odoo").is_symlink():
+        raise PortError(
+            f"{root} .odoo is a symlink to {(root / '.odoo').resolve()}. "
+            "Refusing to write worktree.toml through it."
+        )
     if not is_linked_worktree(root):
         raise PortError(f"{root} is the primary checkout; its ports are fixed in config.toml. "
                         "Only a linked worktree (git worktree add) gets an allocation")

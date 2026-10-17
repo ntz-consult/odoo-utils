@@ -119,7 +119,7 @@ if module_installed "mrp"; then
 fi
 
 # If no settings to apply, exit
-if [ ${#SETTINGS[@]} -eq 0 ]; then
+if [ -z "${SETTINGS[*]:-}" ]; then   # tolerate an empty array under set -u
     echo "No settings to configure."
     exit 0
 fi

@@ -20,6 +20,10 @@ fi
 
 TOKEN="$(printf '%s' "$TARGET" | tr '[:lower:]-' '[:upper:]_' | tr -c 'A-Z0-9_' '_')"
 VARIABLE="ODOO_DIRECT_${TOKEN}_API_KEY"
+if [[ "$TARGET" == local && "${ODOO_SHARED_DATABASE:-}" == 1 ]]; then
+    DATABASE_TOKEN="$(printf '%s' "$DB_NAME" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9_' '_')"
+    VARIABLE="ODOO_DIRECT_LOCAL_${DATABASE_TOKEN}_API_KEY"
+fi
 read -r -s -p "API key for $TARGET: " API_KEY
 echo
 [[ -n "$API_KEY" ]] || { echo "Error: API key cannot be empty." >&2; exit 1; }

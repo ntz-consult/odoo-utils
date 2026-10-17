@@ -23,7 +23,7 @@ source "$SCRIPT_DIR/common.sh"
 
 get_module_state() {
     local module="$1"
-    psql "$DB_NAME" -t -c "SELECT state FROM ir_module_module WHERE name = '$module';" 2>/dev/null | tr -d ' '
+    PGPASSWORD="${DB_PASSWORD:-}" psql -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "${DB_USER:-odoo}" -d "$DB_NAME" -t -c "SELECT state FROM ir_module_module WHERE name = '$module';" 2>/dev/null | tr -d ' '
 }
 
 get_all_modules() {

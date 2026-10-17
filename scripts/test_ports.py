@@ -6,6 +6,7 @@ Run: python3 -m unittest scripts/test_ports.py
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -231,7 +232,13 @@ class WiringTests(PortsBase):
         bin_path = self.odoo / "odoo" / "odoo-bin"
         bin_path.write_text("#!/bin/sh\necho FAKE-ODOO-STARTED \"$@\"\n")
         bin_path.chmod(0o755)
+        # The wrappers also record reservations through the shared `port-tool` command when it
+        # is installed; point it at a private register so tests never touch the real one.
+        reservations = self.base / "PORTS.md"
+        reservations.write_text("# test\n<!-- port-tool:start -->\n| Port | Protocol | Owner | Checkout | Purpose | Reserved UTC |\n"
+                                "| --- | --- | --- | --- | --- | --- |\n<!-- port-tool:end -->\n")
         self.env = dict(os.environ, ODOO_PORTS_REGISTER=str(self.register_path),
+                        PORT_TOOL_REGISTER=str(reservations),
                         GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1",
                         GIT_AUTHOR_NAME="Test", GIT_AUTHOR_EMAIL="test@example.invalid",
                         GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.invalid",
@@ -260,7 +267,36 @@ class WiringTests(PortsBase):
         return subprocess.run(["bash", str(SCRIPTS / script), *args], cwd=root,
                               capture_output=True, text=True, env=self.env)
 
+    def free_pool_port(self, candidates):
+        """A port from the pool that nothing on this host listens on, for real reservation checks."""
+        for port in candidates:
+            with socket.socket() as sock:
+                try:
+                    sock.bind(("0.0.0.0", port))
+                except OSError:
+                    continue
+            return port
+        self.skipTest("no free pool port on this host")
+
+    def test_run_records_reservation_in_shared_register(self):
+        port = self.free_pool_port(range(8251, 8300))
+        root = self.git_checkout("beta", "beta", port)
+        done = self.run_cmd(root, "run.sh")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        register = (self.base / "PORTS.md").read_text()
+        self.assertIn(f"| {port} | tcp | odoo-beta | {root.resolve()} | Odoo server for beta (odoo-run) |", register)
+        again = self.run_cmd(root, "run.sh")
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(register, (self.base / "PORTS.md").read_text())
+        (self.base / "PORTS.md").write_text(register.replace("odoo-beta |", "someone-else |"))
+        refused = self.run_cmd(root, "run.sh")
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("held by another owner", refused.stderr)
+        self.assertNotIn("FAKE-ODOO-STARTED", refused.stdout)
+
     def test_run_inside_pool_starts(self):
+        # 8097 may be live on the host; the reservation wiring has its own test above.
+        self.env["ODOO_PORT_TOOL"] = "none"
         root = self.git_checkout("beta", "beta", 8097)
         done = self.run_cmd(root, "run.sh")
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -338,6 +374,7 @@ class WiringTests(PortsBase):
         self.assertNotIn("8097", conf)
 
     def test_primary_checkout_keeps_its_fixed_port(self):
+        self.env["ODOO_PORT_TOOL"] = "none"   # 8097 may be live on the host
         primary = self.git_checkout("beta", "beta", 8097)
         self.linked_worktree("beta-wt", primary)
         done = self.run_cmd(primary, "run.sh")
@@ -472,6 +509,45 @@ class LinkedWorktreeTests(PortsBase):
         done = subprocess.run([sys.executable, str(SCRIPTS / "ports.py"), "guard", "--root", str(self.primary)],
                               capture_output=True, text=True, env=self.env)
         self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_shared_odoo_uses_the_primary_ports_and_its_own_database(self):
+        import config
+        import shutil
+
+        wt = self.linked("alpha-wt")
+        subprocess.run(
+            ["git", "-C", str(wt), "update-index", "--skip-worktree", ".odoo/config.toml"],
+            check=True,
+            env=self.env,
+        )
+        shutil.rmtree(wt / ".odoo")
+        (wt / ".odoo").symlink_to(self.primary / ".odoo")
+
+        self.assertTrue(config.uses_shared_odoo(wt))
+        self.assertEqual(config.shared_worktree_database(wt), "alpha_wt")
+        self.assertEqual(ports.worktree_problems(wt), [])
+        self.assertEqual(ports.checkout_ports(wt)[1], set())
+        problems = ports.check(self.register, "alpha", wt, 8096, 8596, (9096, 9197))
+        self.assertEqual(problems, [])
+        with self.assertRaisesRegex(ports.PortError, "symlink"):
+            ports.assign(
+                None, "alpha", wt, "alpha_wt", http=8201, test_start=10000,
+                environ={"ODOO_PORTS_LOCK": str(self.lock), "ODOO_PORTS_WORK_ROOT": str(self.work)},
+            )
+
+    def test_shared_odoo_without_a_database_name_is_refused(self):
+        import shutil
+
+        wt = self.linked("other")
+        subprocess.run(
+            ["git", "-C", str(wt), "update-index", "--skip-worktree", ".odoo/config.toml"],
+            check=True,
+            env=self.env,
+        )
+        shutil.rmtree(wt / ".odoo")
+        (wt / ".odoo").symlink_to(self.primary / ".odoo")
+        problems = ports.worktree_problems(wt)
+        self.assertTrue(any("does not name a private database" in problem for problem in problems), problems)
 
 
 if __name__ == "__main__":

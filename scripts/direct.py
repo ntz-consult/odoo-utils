@@ -96,13 +96,24 @@ def load_project_config() -> dict:
     worktree_path = Path(os.environ.get("ODOO_DIRECT_WORKTREE_FILE", root / ".odoo/worktree.toml"))
     loader = _config_loader()
     try:
-        return loader.load_merged_config(config_path, worktree_path)
+        config = loader.load_merged_config(config_path, worktree_path)
+        if loader.uses_shared_odoo(root) and not loader.shared_worktree_database(root):
+            raise TargetError(
+                f"{root} points .odoo at the primary checkout, but its folder name "
+                "does not name a private database."
+            )
+        return loader.apply_shared_worktree_database(config, root)
     except loader.ConfigError as exc:
         raise TargetError(str(exc)) from exc
 
 
-def secret_variable(target_name: str) -> str:
+def secret_variable(target_name: str, database: str = "") -> str:
     token = re.sub(r"[^A-Za-z0-9]", "_", target_name).upper()
+    if target_name == "local" and database:
+        db_token = re.sub(r"[^A-Za-z0-9]", "_", database).upper()
+        scoped = f"ODOO_DIRECT_LOCAL_{db_token}_API_KEY"
+        if os.environ.get("ODOO_SHARED_DATABASE") == "1" or scoped in os.environ:
+            return scoped
     return f"ODOO_DIRECT_{token}_API_KEY"
 
 
@@ -251,7 +262,7 @@ def target_client(config: dict, target_name: str):
         ) from exc
     if version < 17:
         raise TargetError(f"Target {target_name!r} runs unsupported Odoo {version}; minimum is 17.")
-    variable = secret_variable(target_name)
+    variable = secret_variable(target_name, target.get("database", ""))
     resolved = {
         "url": target.get("url", ""),
         "database": target.get("database", ""),
@@ -278,7 +289,7 @@ def print_targets(config: dict, as_json: bool) -> None:
             "endpoint": urlsplit(target.get("url", "")).netloc,
             "tags": ", ".join(target.get("tags", [])),
             "odoo": target.get("odoo_version", ""),
-            "credentials": "configured" if os.environ.get(secret_variable(name)) else "missing",
+            "credentials": "configured" if os.environ.get(secret_variable(name, target.get("database", ""))) else "missing",
         })
     if as_json:
         print(json.dumps(rows, sort_keys=True))

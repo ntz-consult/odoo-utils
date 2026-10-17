@@ -112,11 +112,12 @@ if [ "$MODULES_FROM_CLI" = false ] && [ -t 0 ]; then
 fi
 
 # Drop and recreate database
+# Connect to the maintenance database explicitly: the invoking user has no database of its own.
 echo "Dropping database: $DB_NAME"
-psql -c "drop database if exists $DB_NAME;"
+PGPASSWORD="${DB_PASSWORD:-}" psql -d postgres -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "${DB_USER:-odoo}" -c "drop database if exists \"$DB_NAME\";"
 
 echo "Creating database: $DB_NAME"
-psql -c "create database $DB_NAME OWNER odoo;"
+PGPASSWORD="${DB_PASSWORD:-}" psql -d postgres -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "${DB_USER:-odoo}" -c "create database \"$DB_NAME\" OWNER \"${DB_USER:-odoo}\";"
 
 # Initialize Odoo with requested modules
 echo "Initializing Odoo database with -i $MODULES..."

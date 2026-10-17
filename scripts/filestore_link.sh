@@ -17,7 +17,7 @@ _fsl_json() {
     local root="$1" cfg="$1/.odoo/config.toml" wt="$1/.odoo/worktree.toml"
     local here; here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     [[ -f "$cfg" ]] || { echo '{}'; return; }
-    python3 "$here/config.py" json "$cfg" "$wt" 2>/dev/null || echo '{}'
+    python3 "$here/config.py" json "$cfg" "$wt" "$root" 2>/dev/null || echo '{}'
 }
 
 # Print "<data_dir>|<db>" for a checkout (defaults as in common.sh).

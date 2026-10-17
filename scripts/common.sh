@@ -54,7 +54,8 @@ odoo_load_env() {
 
     # The TOML is portable and committed. The optional worktree file contains
     # explicit local database and port overrides. Credentials stay ignored.
-    eval "$(python3 "$loader" shell "$ODOO_CONFIG_FILE" "$ODOO_WORKTREE_FILE")"
+    # The checkout path lets a worktree that symlinks .odoo select its own database.
+    eval "$(python3 "$loader" shell "$ODOO_CONFIG_FILE" "$ODOO_WORKTREE_FILE" "$resolved_root")"
     if [[ -f "$ODOO_SECRETS_FILE" ]]; then
         set -a
         # shellcheck disable=SC1090
@@ -86,6 +87,16 @@ odoo_load_env() {
     ODOO_PROXY_MODE="${ODOO_PROXY_MODE:-False}"
     ODOO_LOG_LEVEL="${ODOO_LOG_LEVEL:-info}"
     LOG_FILE="${LOG_FILE:-$ENV_DIR/${DB_NAME:-$(basename "$PROJECT_ROOT")}.log}"
+    # A worktree whose .odoo is the primary folder keeps that folder and uses its own
+    # database. The generated server file stays outside the shared folder so starting
+    # this worktree does not rewrite the primary checkout's odoo.conf.
+    if [[ "${ODOO_SHARED_DATABASE:-}" == 1 ]]; then
+        export ODOO_BROWSER_LOCAL_DATABASE="$DB_NAME"
+        local shared_conf_dir="${XDG_CACHE_HOME:-$HOME/.cache}/odoo-utils/conf"
+        mkdir -p -- "$shared_conf_dir"
+        CONF_FILE="$shared_conf_dir/$(basename "$PROJECT_ROOT").conf"
+        LOG_FILE="$ENV_DIR/${DB_NAME}.log"
+    fi
     # Port pools (scripts/ports.py): the project name selects the pool, and the
     # second (gevent/websocket) port follows from the http port when a register exists.
     ODOO_PORTS_PROJECT="${PROJECT_NAME:-$(basename "$PROJECT_ROOT")}"
@@ -145,11 +156,12 @@ odoo_append_local_conf() {
 }
 
 odoo_render_conf() {
-    local temp_conf previous_umask
-    mkdir -p -- "$ENV_DIR"
+    local temp_conf previous_umask conf_dir
+    conf_dir="$(dirname "$CONF_FILE")"
+    mkdir -p -- "$conf_dir"
     previous_umask="$(umask)"
     umask 077
-    temp_conf="$(mktemp "$ENV_DIR/.odoo.conf.XXXXXX")"
+    temp_conf="$(mktemp "$conf_dir/.odoo.conf.XXXXXX")"
     {
         printf '[options]\n'
         printf 'http_interface = %s\n' "$ODOO_HTTP_INTERFACE"
@@ -215,6 +227,44 @@ odoo_enforce_port_pool() {
     fi
 }
 
+# Shared reservation register (the global `port-tool` command, when installed).
+# The pool register above says which ports a project may use; the reservation
+# register says who holds a port right now. odoo-run records its server ports
+# under the owner "odoo-<database>" so restarts are idempotent. The entry stays
+# until the checkout releases it: `port-tool release PORT --owner odoo-<database>`
+# after its server has stopped. Without the command nothing is recorded.
+# Usage: odoo_reserve_ports PURPOSE OWNER PORT...
+odoo_reserve_ports() {
+    local purpose="$1" owner="$2" tool root
+    shift 2
+    tool="${ODOO_PORT_TOOL:-port-tool}"
+    [[ "$tool" == none ]] && return 0   # test suites that must not consult host sockets
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        if [[ "${ODOO_PORT_TOOL_REQUIRED:-0}" == 1 ]]; then
+            echo "Error: $tool is not installed; refusing to start without the port register." >&2
+            return 1
+        fi
+        return 0
+    fi
+    root="$(realpath "$PROJECT_ROOT")"
+    if ! "$tool" reserve "$@" --owner "$owner" --purpose "$purpose" --checkout "$root"; then
+        echo "Refusing to start: port(s) $* are held by another owner or already listening." >&2
+        echo "Run '$tool list' to see the holder. Hand over only after that owner stops its server and releases the port." >&2
+        return 1
+    fi
+}
+
+# Release ports this process reserved. Never fails the caller; a live listener keeps its entry.
+odoo_release_ports() {
+    local owner="$1" tool
+    shift
+    tool="${ODOO_PORT_TOOL:-port-tool}"
+    [[ "$tool" == none ]] && return 0
+    command -v "$tool" >/dev/null 2>&1 || return 0
+    (($#)) || return 0
+    "$tool" release "$@" --owner "$owner" >/dev/null 2>&1 || true
+}
+
 odoo_bootstrap() {
     local mode="${1:-local}"
     odoo_resolve_project "$PWD"
@@ -222,7 +272,12 @@ odoo_bootstrap() {
         init) mkdir -p -- "$ENV_DIR" ;;
         project) odoo_load_env false ;;
         remote) odoo_load_env true ;;
-        local) odoo_load_env true; odoo_require_local_runtime ;;
+        local) odoo_load_env true
+            # Box: dev databases live in the local PostgreSQL 18 (localhost:5432).
+            if [[ "${DB_PORT:-5432}" == 5432 && "${DB_HOST:-localhost}" =~ ^(localhost|127\.0\.0\.1)$ && -x /workspace/Work/sys-admin/odoo/pg-local.sh ]]; then
+                /workspace/Work/sys-admin/odoo/pg-local.sh start >/dev/null || return 1
+            fi
+            odoo_require_local_runtime ;;
         *) echo "Error: unknown Odoo runtime mode '$mode'." >&2; return 1 ;;
     esac
 }

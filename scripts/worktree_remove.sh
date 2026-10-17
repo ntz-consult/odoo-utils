@@ -46,7 +46,7 @@ MAIN="$(cd "$MAIN" && pwd -P)"
 [[ "$ROOT" != "$MAIN" ]] || die "$ROOT is the primary checkout; only linked worktrees are removed"
 
 # Runtime identity from the worktree's own .odoo configuration.
-json_of() { [[ -f "$1/.odoo/config.toml" ]] && python3 "$SCRIPT_DIR/config.py" json "$1/.odoo/config.toml" "$1/.odoo/worktree.toml" 2>/dev/null || echo '{}'; }
+json_of() { [[ -f "$1/.odoo/config.toml" ]] && python3 "$SCRIPT_DIR/config.py" json "$1/.odoo/config.toml" "$1/.odoo/worktree.toml" "$1" 2>/dev/null || echo '{}'; }
 read_key() { python3 -c 'import json,sys
 d=json.loads(sys.argv[1])
 for k in sys.argv[2].split("."):
@@ -154,8 +154,11 @@ elif [[ -n "$DB" && -d "$FILESTORE" ]]; then
         rm -rf -- "$FILESTORE"
     fi
 fi
-# Unlink any filestore symlinks inside the folder first so nothing below can follow them.
-[[ -d "$ROOT/.odoo" ]] && find "$ROOT/.odoo" -type l -delete 2>/dev/null || true
+# A shared .odoo is a symlink to the primary checkout. Remove the worktree folder later.
+# Do not walk that symlink: find would be one step from the primary runtime.
+if [[ ! -L "$ROOT/.odoo" && -d "$ROOT/.odoo" ]]; then
+    find "$ROOT/.odoo" -P -type l -delete 2>/dev/null || true
+fi
 
 echo "Removing worktree $ROOT"
 # Ignored runtime files (.odoo/data, secrets, logs) go with the folder.

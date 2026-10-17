@@ -294,6 +294,23 @@ release_test_port_lock() {
         rm -rf "$TEST_PORT_LOCK_PATH"
         TEST_PORT_LOCK_PATH=""
     fi
+    if [[ -n "${TEST_REGISTERED_PORTS:-}" ]]; then
+        # shellcheck disable=SC2086
+        odoo_release_ports "$TEST_PORT_OWNER" $TEST_REGISTERED_PORTS
+        TEST_REGISTERED_PORTS=""
+    fi
+}
+
+# Record a test pair in the shared reservation register. The owner is stable per
+# database, so an interrupted run leaves an entry the next run reuses and releases.
+register_test_port_pair() {
+    TEST_PORT_OWNER="odoo-test-${DB_NAME}"
+    if odoo_reserve_ports "Odoo test server for ${DB_NAME} (odoo-test)" "$TEST_PORT_OWNER" "$1" "$2" >/dev/null 2>&1; then
+        TEST_REGISTERED_PORTS="$1 $2"
+        trap release_test_port_lock EXIT INT TERM
+        return 0
+    fi
+    return 1
 }
 
 reserve_test_port_pair() {
@@ -400,7 +417,8 @@ resolve_test_ports() {
         local original_gevent_port="$gevent_port"
         while true; do
             if reserve_test_port_pair "$http_port" "$gevent_port"; then
-                if port_available "$http_port" && port_available "$gevent_port"; then
+                if port_available "$http_port" && port_available "$gevent_port" \
+                        && register_test_port_pair "$http_port" "$gevent_port"; then
                     break
                 fi
                 release_test_port_lock
@@ -424,6 +442,10 @@ resolve_test_ports() {
         fi
         if ! port_available "$gevent_port"; then
             echo "Error: Test gevent port $gevent_port is already in use."
+            exit 1
+        fi
+        if ! register_test_port_pair "$http_port" "$gevent_port"; then
+            echo "Error: Test ports $http_port/$gevent_port are reserved by another owner (see 'port-tool list')."
             exit 1
         fi
     fi
